@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 650" role="img" aria-labelledby="title description">
+  <title id="title">Obsidian Graph Wallpaper</title>
+  <desc id="description">A fictional note graph orbiting over a dark desktop background.</desc>
+  <defs>
+    <radialGradient id="bg"><stop stop-color="#18263f"/><stop offset="1" stop-color="#080c16"/></radialGradient>
+    <radialGradient id="glow"><stop stop-color="#5baaff" stop-opacity=".16"/><stop offset="1" stop-color="#5baaff" stop-opacity="0"/></radialGradient>
+    <filter id="blur"><feGaussianBlur stdDeviation="4"/></filter>
+  </defs>
+  <rect width="1200" height="650" rx="30" fill="url(#bg)"/>
+  <ellipse cx="610" cy="330" rx="450" ry="280" fill="url(#glow)"/>
+  <g fill="none" stroke="#79baff" stroke-opacity=".25" stroke-width="1.5">
+    <path d="M245 310 350 204 497 242 626 155 748 245 898 192 1001 313 868 407 724 366 584 478 439 390 308 439 245 310Z"/>
+    <path d="M350 204 439 390M497 242 584 478M626 155 584 478M748 245 724 366M898 192 868 407M245 310 497 242M308 439 497 242M439 390 724 366M748 245 1001 313M626 155 898 192"/>
+  </g>
+  <g fill="#77c4ff" filter="url(#blur)" opacity=".6">
+    <circle cx="245" cy="310" r="8"/><circle cx="350" cy="204" r="7"/><circle cx="497" cy="242" r="10"/><circle cx="626" cy="155" r="8"/><circle cx="748" cy="245" r="7"/><circle cx="898" cy="192" r="9"/><circle cx="1001" cy="313" r="7"/><circle cx="868" cy="407" r="8"/><circle cx="724" cy="366" r="11"/><circle cx="584" cy="478" r="9"/><circle cx="439" cy="390" r="8"/><circle cx="308" cy="439" r="6"/>
+  </g>
+  <g fill="#e8f4ff">
+    <circle cx="245" cy="310" r="3"/><circle cx="350" cy="204" r="3"/><circle cx="497" cy="242" r="4"/><circle cx="626" cy="155" r="3"/><circle cx="748" cy="245" r="3"/><circle cx="898" cy="192" r="4"/><circle cx="1001" cy="313" r="3"/><circle cx="868" cy="407" r="3"/><circle cx="724" cy="366" r="4"/><circle cx="584" cy="478" r="3"/><circle cx="439" cy="390" r="3"/><circle cx="308" cy="439" r="3"/>
+  </g>
+  <g fill="#e7efff" fill-opacity=".72" font-family="sans-serif" font-size="14">
+    <text x="263" y="307">Home</text><text x="368" y="201">Ideas</text><text x="516" y="238">Knowledge</text><text x="644" y="152">Projects</text><text x="766" y="242">People</text><text x="916" y="189">Research</text><text x="886" y="404">Daily</text><text x="742" y="363">Decisions</text><text x="457" y="387">Tasks</text>
+  </g>
+</svg>
