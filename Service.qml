@@ -9,14 +9,20 @@ Item {
   property var shell: null
   property var manifest: null
   property var graphData: ({ nodes: [], edges: [] })
+  property var agentActivity: []
+  property var recentlyChangedIds: []
   property string errorText: ""
   property bool refreshQueued: false
+  property bool vaultWatcherReady: false
+  property double lastGraphRefresh: 0
 
   readonly property string home: Quickshell.env("HOME") || ""
   readonly property string vaultPath: Quickshell.env("OBSIDIAN_VAULT_PATH") || (home + "/Documents/Agent_Vault")
   readonly property string requestedOutput: Quickshell.env("OMARCHY_OBSIDIAN_GRAPH_OUTPUT") || "largest"
   readonly property string pluginId: "io.github.damiankluk.obsidian-graph"
   readonly property string exporterPath: decodeURIComponent(String(Qt.resolvedUrl("export_graph.py")).replace(/^file:\/\//, ""))
+  readonly property string watcherPath: decodeURIComponent(String(Qt.resolvedUrl("watch_vault.py")).replace(/^file:\/\//, ""))
+  readonly property string activityHelperPath: decodeURIComponent(String(Qt.resolvedUrl("agent_activity.py")).replace(/^file:\/\//, ""))
   readonly property bool userActive: !activityMonitor.isIdle
   readonly property string activeNoteTitle: {
     var top = ToplevelManager.activeToplevel
@@ -55,12 +61,43 @@ Item {
     refreshProcess.running = true
   }
 
+  function handleWatchEvent(line) {
+    try {
+      var event = JSON.parse(String(line).trim())
+      if (event.event === "ready") {
+        vaultWatcherReady = true
+        return
+      }
+      if (event.event !== "change") return
+      var relative = String(event.path || "")
+      if (relative !== "") {
+        var changed = recentlyChangedIds.slice(0)
+        if (changed.indexOf(relative) < 0) changed.push(relative)
+        recentlyChangedIds = changed
+        changedNoteTimer.restart()
+      }
+      graphRefreshDebounce.restart()
+    } catch (e) {
+      console.warn("obsidian-graph: ignored a malformed vault watcher event")
+    }
+  }
+
+  function applyAgentSnapshot(content) {
+    try {
+      var parsed = JSON.parse(String(content || "{}"))
+      agentActivity = Array.isArray(parsed.agents) ? parsed.agents : []
+    } catch (e) {
+      agentActivity = []
+    }
+  }
+
   function applyOutput(output) {
     try {
       var parsed = JSON.parse(output)
       if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) throw new Error("Unexpected graph data")
       graphData = parsed
       errorText = ""
+      lastGraphRefresh = Date.now()
     } catch (e) {
       errorText = "Could not parse the vault graph: " + String(e)
       console.warn("obsidian-graph: " + errorText)
@@ -77,6 +114,9 @@ Item {
         nodes: root.graphData.nodes.length,
         edges: root.graphData.edges.length,
         activity: root.userActive ? "active" : "idle",
+        activeAgents: root.agentActivity,
+        vaultWatcher: root.vaultWatcherReady ? "ready" : "retrying",
+        lastGraphRefresh: root.lastGraphRefresh,
         error: root.errorText
       })
     }
@@ -110,10 +150,62 @@ Item {
     }
   }
 
+  Process {
+    id: vaultWatcher
+    command: ["python3", root.watcherPath, root.vaultPath]
+    running: true
+    stdout: SplitParser {
+      onRead: function(line) { root.handleWatchEvent(String(line)) }
+    }
+    onExited: function() {
+      root.vaultWatcherReady = false
+      vaultWatcherRestart.start()
+    }
+  }
+
+  Process {
+    id: agentActivityReader
+    command: ["python3", root.activityHelperPath, "snapshot"]
+    running: true
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.applyAgentSnapshot(text)
+    }
+    stderr: StdioCollector { waitForEnd: true }
+  }
+
+  // Snapshot reads are bounded and local; no agent prompt or transcript is read.
   Timer {
-    // Removable vaults can mount after the shell starts. Retry quickly while
-    // the graph is empty, then return to the normal two-minute refresh.
-    interval: root.graphData.nodes.length === 0 ? 10000 : 120000
+    interval: 1000
+    repeat: true
+    running: true
+    onTriggered: if (!agentActivityReader.running) agentActivityReader.running = true
+  }
+
+  Timer {
+    id: graphRefreshDebounce
+    interval: 750
+    repeat: false
+    onTriggered: root.refresh()
+  }
+
+  Timer {
+    id: changedNoteTimer
+    interval: 12000
+    repeat: false
+    onTriggered: root.recentlyChangedIds = []
+  }
+
+  Timer {
+    id: vaultWatcherRestart
+    interval: 5000
+    repeat: false
+    onTriggered: if (!vaultWatcher.running) vaultWatcher.running = true
+  }
+
+  Timer {
+    // Keep a bounded full scan as a recovery path if inotify drops or fails.
+    interval: root.graphData.nodes.length === 0 ? 10000 : (root.vaultWatcherReady ? 300000 : 15000)
     repeat: true
     running: true
     triggeredOnStart: true
@@ -138,6 +230,8 @@ Item {
         animationEnabled: root.graphData.nodes.length > 0
         userActive: root.userActive
         activeNoteTitle: root.activeNoteTitle
+        agentActivity: root.agentActivity
+        recentlyChangedIds: root.recentlyChangedIds
       }
     }
   }

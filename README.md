@@ -11,7 +11,8 @@ An animated, local-only graph wallpaper for an Obsidian vault. It projects linke
 - Renders a perspective projection with a slow orbit using Quickshell Canvas; it does not require QtQuick3D, WebGL, a CDN, or network access.
 - Defaults to the display with the largest pixel area. Set `OMARCHY_OBSIDIAN_GRAPH_OUTPUT` to a connector name (for example `DP-2`) to pick a display explicitly.
 - Responds to keyboard or pointer activity with a faster orbit; moving the pointer over the exposed desktop adds gentle camera parallax. When an Obsidian window is focused, the matching note node is highlighted by title.
-- Retries every ten seconds until the vault is available, then refreshes the graph every two minutes. Call `omarchy-shell io.github.damiankluk.obsidian-graph refresh` to refresh manually.
+- Watches Markdown files with Linux inotify and refreshes the graph shortly after a save; a bounded five-minute scan recovers from missed watcher events. If the vault is not mounted, it retries every ten seconds. Call `omarchy-shell io.github.damiankluk.obsidian-graph refresh` to refresh manually.
+- Highlights recently edited notes briefly. Optional lifecycle hooks for Codex, Claude Code, and Antigravity make the graph glow while an agent turn is active; the small HUD names active agents.
 - Reads only local Markdown files. Note bodies are not sent anywhere or stored; the graph data stays in memory.
 - Skips hidden folders, `.obsidian`, `.git`, `_trash`, `.trash`, and `node_modules`; also honors `userIgnoreFilters` from `.obsidian/app.json`.
 
@@ -22,6 +23,7 @@ This is a wallpaper visualization, not an interactive Obsidian workspace. It doe
 - Omarchy Quattro shell plugins.
 - Python 3 and GNU Coreutils `timeout`.
 - No extra Python packages, QtQuick3D module, credentials, or network connection.
+- Linux inotify support (provided by the kernel; no `inotify-tools` package required).
 
 ## Install
 
@@ -30,6 +32,18 @@ omarchy plugin add https://github.com/damiankluk/obsidian-graph-wallpaper.git --
 ```
 
 To install a local checkout manually, copy the repository to `~/.config/omarchy/plugins/io.github.damiankluk.obsidian-graph/`, run `omarchy-shell shell rescanPlugins`, then run `omarchy plugin enable io.github.damiankluk.obsidian-graph`.
+
+### Optional agent activity pulse
+
+Run the following after installing the plugin to add non-blocking lifecycle hooks to existing user configuration files:
+
+```bash
+python3 ~/.config/omarchy/plugins/io.github.damiankluk.obsidian-graph/scripts/manage_agent_hooks.py install
+```
+
+The installer preserves existing hooks and writes a timestamped `.bak` before changing each file. To remove only this plugin's hooks, run `.../scripts/manage_agent_hooks.py remove`. Codex may require reviewing the new hook in `/hooks`; Antigravity may need its hooks page refreshed or the app restarted.
+
+The hooks only pass lifecycle JSON to the local helper. It discards prompts, tool arguments, transcripts, paths, and conversation IDs; it stores only active agent names and short-lived session hashes in a mode-600 file under `$XDG_RUNTIME_DIR/obsidian-graph/`. A three-minute lease clears activity if an agent exits without a stop event. Agent hooks are optional; vault watching works without them.
 
 ## Configure
 
@@ -48,7 +62,7 @@ Disable the plugin with `omarchy plugin disable io.github.damiankluk.obsidian-gr
 
 The plugin runs unsandboxed inside `omarchy-shell`, as all Omarchy plugins do. Its bundled Python helper reads `.md` files under the selected vault and the `userIgnoreFilters` setting from `.obsidian/app.json`, then prints a bounded graph summary to the QML process. It reads no credentials and makes no network requests. It skips files larger than 1 MB, includes at most 1,200 notes and 4,000 links, and each scan is stopped after 30 seconds. Only labels, folder groups, coordinates, and links enter the in-memory visual model; note bodies are discarded after link extraction.
 
-Input handling uses Quickshell's aggregate idle state and passive hover events on the background surface. It does not record key values or store pointer positions. Cursor parallax is available while the desktop background receives hover events; the activity-based orbit also responds while another window is focused.
+Input handling uses Quickshell's aggregate idle state and passive hover events on the background surface. It does not record key values or store pointer positions. Cursor parallax is available while the desktop background receives hover events; the activity-based orbit also responds while another window is focused. Agent activity uses supported lifecycle hooks; it does not infer work from process names.
 
 ## Development and validation
 

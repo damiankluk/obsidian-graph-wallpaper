@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.damiankluk.obsidian-graph",
   "name": "Obsidian Graph Wallpaper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "damiankluk",
   "license": "MIT",
   "description": "Animated, local-only 3D-style graph wallpaper for an Obsidian vault.",

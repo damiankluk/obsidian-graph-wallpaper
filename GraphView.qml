@@ -7,6 +7,8 @@ Canvas {
   property bool animationEnabled: false
   property bool userActive: false
   property string activeNoteTitle: ""
+  property var agentActivity: []
+  property var recentlyChangedIds: []
   property real yaw: 0
   property real pitch: 0.12
   property int frame: 0
@@ -46,6 +48,30 @@ Canvas {
     var edges = graph && Array.isArray(graph.edges) ? graph.edges : []
     if (!nodes.length) return
 
+    var agents = Array.isArray(agentActivity) ? agentActivity : []
+    var agentPulse = agents.length ? (Math.sin(frame * 0.12) + 1) * 0.5 : 0
+    if (agents.length) {
+      var centerX = width * 0.5
+      var centerY = height * 0.5
+      var ringRadius = 24 + agentPulse * 9
+      var reactor = ctx.createRadialGradient(centerX, centerY, 1, centerX, centerY, ringRadius * 2.1)
+      reactor.addColorStop(0, "rgba(95, 205, 255, " + (0.05 + agentPulse * 0.07) + ")")
+      reactor.addColorStop(1, "rgba(95, 205, 255, 0)")
+      ctx.fillStyle = reactor
+      ctx.beginPath()
+      ctx.arc(centerX, centerY, ringRadius * 2.1, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.arc(centerX, centerY, ringRadius, 0, Math.PI * 2)
+      ctx.lineWidth = 1.1 + agentPulse * 0.8
+      ctx.strokeStyle = "rgba(120, 215, 255, " + (0.18 + agentPulse * 0.28) + ")"
+      ctx.stroke()
+      ctx.font = "11px sans-serif"
+      ctx.textAlign = "right"
+      ctx.fillStyle = "rgba(180, 225, 255, 0.62)"
+      ctx.fillText(agents.map(function(agent) { return String(agent).toUpperCase() }).join("  ·  "), width - 30, 38)
+    }
+
     var projected = new Array(nodes.length)
     var lookup = Object.create(null)
     for (var i = 0; i < nodes.length; i++) {
@@ -76,6 +102,7 @@ Canvas {
       var point = projected[n]
       var depthScale = clamp(1.25 - point.z * 0.32, 0.55, 1.8)
       var nodeRadius = clamp((2.2 + Math.sqrt(item.degree || 0) * 0.55) * depthScale, 1.5, 7)
+      var changed = Array.isArray(recentlyChangedIds) && recentlyChangedIds.indexOf(String(item.id)) >= 0
       var hue = (item.groupIndex * 67 + 192) % 360
       ctx.beginPath()
       ctx.arc(point.x, point.y, nodeRadius * 2.4, 0, Math.PI * 2)
@@ -85,6 +112,21 @@ Canvas {
       ctx.arc(point.x, point.y, nodeRadius, 0, Math.PI * 2)
       ctx.fillStyle = "hsla(" + hue + ", 82%, 76%, " + (0.38 + (1 - point.z) * 0.38) + ")"
       ctx.fill()
+
+      if (changed) {
+        var editPulse = (Math.sin(frame * 0.22) + 1) * 0.5
+        ctx.beginPath()
+        ctx.arc(point.x, point.y, nodeRadius + 5 + editPulse * 4, 0, Math.PI * 2)
+        ctx.lineWidth = 1.6
+        ctx.strokeStyle = "rgba(255, 222, 145, " + (0.35 + editPulse * 0.5) + ")"
+        ctx.stroke()
+      } else if (agents.length) {
+        ctx.beginPath()
+        ctx.arc(point.x, point.y, nodeRadius + 2 + agentPulse * 2, 0, Math.PI * 2)
+        ctx.lineWidth = 0.6
+        ctx.strokeStyle = "rgba(105, 195, 255, " + (0.04 + agentPulse * 0.10) + ")"
+        ctx.stroke()
+      }
 
       var focused = activeNoteTitle !== "" && String(item.label).toLocaleLowerCase() === activeNoteTitle.toLocaleLowerCase()
       if (focused) {
@@ -96,11 +138,13 @@ Canvas {
         ctx.stroke()
       }
 
-      if ((item.degree || 0) >= 3 || focused) labelCandidates.push({ node: item, point: point, depth: point.z, focused: focused })
+      if ((item.degree || 0) >= 3 || focused || changed)
+        labelCandidates.push({ node: item, point: point, depth: point.z, focused: focused, changed: changed })
     }
 
     labelCandidates.sort(function(a, b) {
       if (a.focused !== b.focused) return a.focused ? -1 : 1
+      if (a.changed !== b.changed) return a.changed ? -1 : 1
       if ((b.node.degree || 0) !== (a.node.degree || 0)) return (b.node.degree || 0) - (a.node.degree || 0)
       return a.depth - b.depth
     })
@@ -147,4 +191,6 @@ Canvas {
   onGraphChanged: requestPaint()
   onUserActiveChanged: requestPaint()
   onActiveNoteTitleChanged: requestPaint()
+  onAgentActivityChanged: requestPaint()
+  onRecentlyChangedIdsChanged: requestPaint()
 }
