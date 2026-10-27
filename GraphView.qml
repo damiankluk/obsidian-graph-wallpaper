@@ -5,19 +5,25 @@ Canvas {
 
   property var graph: ({ nodes: [], edges: [] })
   property bool animationEnabled: false
+  property bool userActive: false
+  property string activeNoteTitle: ""
   property real yaw: 0
   property real pitch: 0.12
   property int frame: 0
+  property real pointerYaw: 0
+  property real pointerPitch: 0
+  property real pointerTargetYaw: 0
+  property real pointerTargetPitch: 0
 
   function clamp(value, low, high) {
     return Math.max(low, Math.min(high, value))
   }
 
   function pointFor(node) {
-    var cy = Math.cos(yaw)
-    var sy = Math.sin(yaw)
-    var cp = Math.cos(pitch)
-    var sp = Math.sin(pitch)
+    var cy = Math.cos(yaw + pointerYaw)
+    var sy = Math.sin(yaw + pointerYaw)
+    var cp = Math.cos(pitch + pointerPitch)
+    var sp = Math.sin(pitch + pointerPitch)
     var x1 = node.x * cy - node.z * sy
     var z1 = node.x * sy + node.z * cy
     var y2 = node.y * cp - z1 * sp
@@ -80,10 +86,21 @@ Canvas {
       ctx.fillStyle = "hsla(" + hue + ", 82%, 76%, " + (0.38 + (1 - point.z) * 0.38) + ")"
       ctx.fill()
 
-      if ((item.degree || 0) >= 3) labelCandidates.push({ node: item, point: point, depth: point.z })
+      var focused = activeNoteTitle !== "" && String(item.label).toLocaleLowerCase() === activeNoteTitle.toLocaleLowerCase()
+      if (focused) {
+        var focusPulse = userActive ? (Math.sin(frame * 0.12) + 1) * 0.5 : 0.25
+        ctx.beginPath()
+        ctx.arc(point.x, point.y, nodeRadius + 4 + focusPulse * 2, 0, Math.PI * 2)
+        ctx.lineWidth = 1.4
+        ctx.strokeStyle = "rgba(227, 242, 255, " + (0.38 + focusPulse * 0.42) + ")"
+        ctx.stroke()
+      }
+
+      if ((item.degree || 0) >= 3 || focused) labelCandidates.push({ node: item, point: point, depth: point.z, focused: focused })
     }
 
     labelCandidates.sort(function(a, b) {
+      if (a.focused !== b.focused) return a.focused ? -1 : 1
       if ((b.node.degree || 0) !== (a.node.degree || 0)) return (b.node.degree || 0) - (a.node.degree || 0)
       return a.depth - b.depth
     })
@@ -102,14 +119,32 @@ Canvas {
     repeat: true
     running: root.animationEnabled && root.visible
     onTriggered: {
-      root.yaw += 0.009
+      root.yaw += root.userActive ? 0.009 : 0.0025
       root.pitch = 0.12 + Math.sin(root.yaw * 0.37) * 0.09
+      root.pointerYaw += (root.pointerTargetYaw - root.pointerYaw) * 0.035
+      root.pointerPitch += (root.pointerTargetPitch - root.pointerPitch) * 0.035
       root.frame += 1
       root.requestPaint()
+    }
+  }
+
+  HoverHandler {
+    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+    onPointChanged: {
+      root.pointerTargetYaw = ((point.position.x / Math.max(1, root.width)) - 0.5) * 0.42
+      root.pointerTargetPitch = ((point.position.y / Math.max(1, root.height)) - 0.5) * 0.24
+    }
+    onActiveChanged: {
+      if (!active) {
+        root.pointerTargetYaw = 0
+        root.pointerTargetPitch = 0
+      }
     }
   }
 
   onWidthChanged: requestPaint()
   onHeightChanged: requestPaint()
   onGraphChanged: requestPaint()
+  onUserActiveChanged: requestPaint()
+  onActiveNoteTitleChanged: requestPaint()
 }

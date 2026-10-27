@@ -17,6 +17,12 @@ Item {
   readonly property string requestedOutput: Quickshell.env("OMARCHY_OBSIDIAN_GRAPH_OUTPUT") || "largest"
   readonly property string pluginId: "io.github.damiankluk.obsidian-graph"
   readonly property string exporterPath: decodeURIComponent(String(Qt.resolvedUrl("export_graph.py")).replace(/^file:\/\//, ""))
+  readonly property bool userActive: !activityMonitor.isIdle
+  readonly property string activeNoteTitle: {
+    var top = ToplevelManager.activeToplevel
+    if (!top || !/obsidian/i.test(String(top.appId || ""))) return ""
+    return String(top.title || "").replace(/\s*[-|]\s*Obsidian.*$/i, "").split(/\s+-\s+/)[0].trim()
+  }
 
   function selectedScreens() {
     var screens = Quickshell.screens || []
@@ -70,9 +76,19 @@ Item {
         output: root.targetScreens.length ? String(root.targetScreens[0].name) : "not found",
         nodes: root.graphData.nodes.length,
         edges: root.graphData.edges.length,
+        activity: root.userActive ? "active" : "idle",
         error: root.errorText
       })
     }
+  }
+
+  // Quickshell reports aggregate idle state only. No key values or pointer
+  // coordinates leave the background surface or enter persistent storage.
+  IdleMonitor {
+    id: activityMonitor
+    enabled: true
+    timeout: 2
+    respectInhibitors: false
   }
 
   Process {
@@ -118,6 +134,8 @@ Item {
         anchors.fill: parent
         graph: root.graphData
         animationEnabled: root.graphData.nodes.length > 0
+        userActive: root.userActive
+        activeNoteTitle: root.activeNoteTitle
       }
     }
   }

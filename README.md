@@ -10,6 +10,7 @@ An animated, local-only graph wallpaper for an Obsidian vault. It projects linke
 - Supports Obsidian wikilinks and ordinary Markdown links between notes.
 - Renders a perspective projection with a slow orbit using Quickshell Canvas; it does not require QtQuick3D, WebGL, a CDN, or network access.
 - Defaults to the display with the largest pixel area. Set `OMARCHY_OBSIDIAN_GRAPH_OUTPUT` to a connector name (for example `DP-2`) to pick a display explicitly.
+- Responds to keyboard or pointer activity with a faster orbit; moving the pointer over the exposed desktop adds gentle camera parallax. When an Obsidian window is focused, the matching note node is highlighted by title.
 - Refreshes the graph every two minutes. Call `omarchy-shell io.github.damiankluk.obsidian-graph refresh` to refresh manually.
 - Reads only local Markdown files. Note bodies are not sent anywhere or stored; the graph data stays in memory.
 - Skips hidden folders, `.obsidian`, `.git`, `_trash`, `.trash`, and `node_modules`; also honors `userIgnoreFilters` from `.obsidian/app.json`.
@@ -46,6 +47,8 @@ Disable the plugin with `omarchy plugin disable io.github.damiankluk.obsidian-gr
 ## Privacy and resource limits
 
 The plugin runs unsandboxed inside `omarchy-shell`, as all Omarchy plugins do. Its bundled Python helper reads `.md` files under the selected vault and the `userIgnoreFilters` setting from `.obsidian/app.json`, then prints a bounded graph summary to the QML process. It reads no credentials and makes no network requests. It skips files larger than 1 MB, includes at most 1,200 notes and 4,000 links, and each scan is stopped after 30 seconds. Only labels, folder groups, coordinates, and links enter the in-memory visual model; note bodies are discarded after link extraction.
+
+Input handling uses Quickshell's aggregate idle state and passive hover events on the background surface. It does not record key values or store pointer positions. Cursor parallax is available while the desktop background receives hover events; the activity-based orbit also responds while another window is focused.
 
 ## Development and validation
 
