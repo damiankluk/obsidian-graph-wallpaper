@@ -111,7 +111,9 @@ Item {
   }
 
   Timer {
-    interval: 120000
+    // Removable vaults can mount after the shell starts. Retry quickly while
+    // the graph is empty, then return to the normal two-minute refresh.
+    interval: root.graphData.nodes.length === 0 ? 10000 : 120000
     repeat: true
     running: true
     triggeredOnStart: true

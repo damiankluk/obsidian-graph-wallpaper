@@ -11,7 +11,7 @@ An animated, local-only graph wallpaper for an Obsidian vault. It projects linke
 - Renders a perspective projection with a slow orbit using Quickshell Canvas; it does not require QtQuick3D, WebGL, a CDN, or network access.
 - Defaults to the display with the largest pixel area. Set `OMARCHY_OBSIDIAN_GRAPH_OUTPUT` to a connector name (for example `DP-2`) to pick a display explicitly.
 - Responds to keyboard or pointer activity with a faster orbit; moving the pointer over the exposed desktop adds gentle camera parallax. When an Obsidian window is focused, the matching note node is highlighted by title.
-- Refreshes the graph every two minutes. Call `omarchy-shell io.github.damiankluk.obsidian-graph refresh` to refresh manually.
+- Retries every ten seconds until the vault is available, then refreshes the graph every two minutes. Call `omarchy-shell io.github.damiankluk.obsidian-graph refresh` to refresh manually.
 - Reads only local Markdown files. Note bodies are not sent anywhere or stored; the graph data stays in memory.
 - Skips hidden folders, `.obsidian`, `.git`, `_trash`, `.trash`, and `node_modules`; also honors `userIgnoreFilters` from `.obsidian/app.json`.
 
