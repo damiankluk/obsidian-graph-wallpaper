@@ -11,6 +11,5 @@
   ],
   "entryPoints": {
     "service": "Service.qml"
-  },
-  "keepLoaded": true
+  }
 }

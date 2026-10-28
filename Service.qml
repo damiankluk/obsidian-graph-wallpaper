@@ -192,6 +192,7 @@ Item {
     function refresh(): void { root.refresh() }
     function status(): string {
       return JSON.stringify({
+        diagnosticBuild: "7c83763",
         vaultPath: root.vaultPath,
         output: root.targetScreens.length ? String(root.targetScreens[0].name) : "not found",
         nodes: root.graphData.nodes.length,
