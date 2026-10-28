@@ -10,6 +10,6 @@
     "service"
   ],
   "entryPoints": {
-    "service": "Service.qml"
+    "service": "GraphService.qml"
   }
 }
