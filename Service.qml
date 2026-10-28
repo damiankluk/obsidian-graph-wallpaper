@@ -329,7 +329,7 @@ Item {
       WlrLayershell.layer: WlrLayer.Bottom
       WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
-      AgentGraphView {
+      GraphView {
         id: graphView
         anchors.fill: parent
         opacity: root.graphData.nodes.length > 0 && firstFramePainted ? 1 : 0

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repeatable graph benchmark: real AgentGraphView, synthetic fixture and activity state.
+"""Repeatable graph benchmark: real GraphView, synthetic fixture and activity state.
 
 Usage: bench/run_benchmark.py [--fixture approved|limit] [--states idle,agent,...]
                               [--duration 60] [--warmup 3] [--output DP-2]
@@ -119,10 +119,10 @@ def stage_shell(out_dir: pathlib.Path) -> pathlib.Path:
     """Config folder for Quickshell: the bench shell beside symlinks to the real view and shaders.
 
     Quickshell cannot import a parent directory, and symlinks keep the measured
-    code byte-for-byte the plugin's own AgentGraphView.qml and shaders as found.
+    code byte-for-byte the plugin's own GraphView.qml and shaders as found.
     """
     stage = out_dir  # a temp dir outside the plugin: symlinks inside it fail plugin validation
-    for name in ("AgentGraphView.qml", "Cadence.js", "shaders"):
+    for name in ("GraphView.qml", "Cadence.js", "shaders"):
         link = stage / name
         if not link.is_symlink():
             link.symlink_to(PLUGIN_ROOT / name)

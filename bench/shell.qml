@@ -3,10 +3,10 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 
-// Benchmark host for the real AgentGraphView. Not loaded from bench/ directly: Quickshell
+// Benchmark host for the real GraphView. Not loaded from bench/ directly: Quickshell
 // refuses imports outside the config folder, so run_benchmark.py stages this file
-// next to symlinks to AgentGraphView.qml and shaders/ and launches it there,
-// where AgentGraphView resolves as a same-directory type. Launched with
+// next to symlinks to the plugin's GraphView.qml and shaders/ and launches it there,
+// where GraphView resolves as a same-directory type. Launched with
 // OGBENCH_* environment variables; not part of the shipped plugin. Activity is
 // injected as synthetic state only: the surface has an empty input region, so
 // it never receives real pointer or keyboard input.
@@ -130,7 +130,7 @@ ShellRoot {
       // Empty input region: real input never reaches the injected-state view.
       mask: Region {}
 
-      AgentGraphView {
+      GraphView {
         id: graphView
         anchors.fill: parent
         graph: bench.graph
