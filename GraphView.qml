@@ -16,6 +16,9 @@ Item {
   property alias activeNoteTitle: root.activeNoteTitle
   property alias agentActivity: root.agentActivity
   property alias recentlyChangedIds: root.recentlyChangedIds
+  readonly property real agentMotionLevel: root.agentLevel
+  readonly property real thoughtMotionLevel: root.thoughtLevel
+  readonly property int bubbleShaderStatus: gpuSurface.status
   // Injection surface for the benchmark: the same properties the HoverHandler
   // drives, so synthetic pointer state exercises the real code path.
   property alias pointerOver: root.pointerOver

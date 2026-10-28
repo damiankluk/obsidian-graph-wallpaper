@@ -15,6 +15,9 @@ Item {
   property string errorText: ""
   property bool refreshQueued: false
   property bool vaultWatcherReady: false
+  property real renderedAgentLevel: 0
+  property real renderedThoughtLevel: 0
+  property int renderedShaderStatus: -1
   property bool freshGraphLoaded: false
   property double lastGraphRefresh: 0
   property var targetScreens: []
@@ -195,6 +198,9 @@ Item {
         edges: root.graphData.edges.length,
         activity: root.userActive ? "active" : "idle",
         activeAgents: root.agentActivity,
+        renderedAgentLevel: root.renderedAgentLevel,
+        renderedThoughtLevel: root.renderedThoughtLevel,
+        shaderStatus: root.renderedShaderStatus,
         vaultWatcher: root.vaultWatcherReady ? "ready" : "retrying",
         lastGraphRefresh: root.lastGraphRefresh,
         error: root.errorText
@@ -333,6 +339,20 @@ Item {
         activeNoteTitle: root.activeNoteTitle
         agentActivity: root.agentActivity
         recentlyChangedIds: root.recentlyChangedIds
+        onAgentMotionLevelChanged: {
+          if (agentMotionLevel > 0.98 || agentMotionLevel < 0.02)
+            root.renderedAgentLevel = agentMotionLevel
+        }
+        onThoughtMotionLevelChanged: {
+          if (thoughtMotionLevel > 0.98 || thoughtMotionLevel < 0.02)
+            root.renderedThoughtLevel = thoughtMotionLevel
+        }
+        onBubbleShaderStatusChanged: root.renderedShaderStatus = bubbleShaderStatus
+        Component.onCompleted: {
+          root.renderedAgentLevel = agentMotionLevel
+          root.renderedThoughtLevel = thoughtMotionLevel
+          root.renderedShaderStatus = bubbleShaderStatus
+        }
       }
     }
   }
