@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "shaders": {
+    "bubble.vert.qsb": {
+      "source_sha256": "3ec90cc8280136d60e5f7005e314d266c7fdbddfe46529581dd80d6e3603096e",
+      "artifact_sha256": "98610aa837f21311a17da92540e4c98923bfbc3eeec759dff3563b61cd18f8b2"
+    },
+    "bubble.frag.qsb": {
+      "source_sha256": "c9f6837ec36bdf119f44307c6d2fee2004d6613238f00688c5593d2ebfab82a6",
+      "artifact_sha256": "c69f558ba09b4e50ca751ba2b4923d71c60cd4e003636b7c0edfe7e9470801d9"
+    }
+  }
+}

@@ -8,12 +8,15 @@ import json
 import math
 import re
 import sys
+import os
+import tempfile
 from pathlib import Path
 from urllib.parse import unquote
 
 MAX_NOTES = 1200
 MAX_FILE_BYTES = 1_000_000
 MAX_EDGES = 4000
+MAX_CACHE_BYTES = 4_000_000
 SKIP_DIRS = {".obsidian", ".git", ".trash", "_trash", "node_modules"}
 WIKILINK_RE = re.compile(r"!?\[\[([^\]]+)\]\]")
 MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
@@ -133,18 +136,54 @@ def export(vault: Path) -> dict:
         })
 
     return {
+        # Production accepts only this origin. Benchmark fixtures carry a
+        # distinct marker so they cannot masquerade as live vault data.
+        "origin": "obsidian-vault",
         "nodes": nodes,
         "edges": [list(edge) for edge in sorted(edges)],
         "stats": {"notes": len(nodes), "links": len(edges), "noteLimit": MAX_NOTES, "linkLimit": MAX_EDGES},
     }
 
 
+def write_cache(path: Path, payload: str) -> None:
+    encoded = payload.encode("utf-8")
+    if len(encoded) > MAX_CACHE_BYTES:
+        raise ValueError("Graph cache exceeds the 4 MB limit")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    fd, temporary = tempfile.mkstemp(prefix=".graph-", dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as cache_file:
+            cache_file.write(encoded)
+            cache_file.flush()
+            os.fsync(cache_file.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("Usage: export_graph.py VAULT_PATH", file=sys.stderr)
+    args = sys.argv[1:]
+    cache_path = None
+    if len(args) == 3 and args[1] == "--cache":
+        cache_path = Path(args[2])
+        args = [args[0]]
+    if len(args) != 1:
+        print("Usage: export_graph.py VAULT_PATH [--cache CACHE_PATH]", file=sys.stderr)
         return 2
     try:
-        print(json.dumps(export(Path(sys.argv[1])), separators=(",", ":")))
+        payload = json.dumps(export(Path(args[0])), separators=(",", ":"))
+        if cache_path is not None:
+            try:
+                write_cache(cache_path, payload)
+            except OSError as exc:
+                print(f"Could not update graph cache: {exc}", file=sys.stderr)
+        print(payload)
     except (OSError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1

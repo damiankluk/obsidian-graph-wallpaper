@@ -15,6 +15,31 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class RuntimeIntegrationTests(unittest.TestCase):
+    def test_graph_export_writes_private_atomic_runtime_cache(self):
+        with tempfile.TemporaryDirectory(prefix="graph-cache-") as temporary:
+            root = pathlib.Path(temporary)
+            vault = root / "vault"
+            vault.mkdir()
+            (vault / "A.md").write_text("[[B]]", encoding="utf-8")
+            (vault / "B.md").write_text("# B", encoding="utf-8")
+            cache = root / "runtime" / "obsidian-graph" / "graph.json"
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "export_graph.py"), str(vault), "--cache", str(cache)],
+                check=True, capture_output=True, text=True,
+            )
+            output = json.loads(result.stdout)
+            saved = json.loads(cache.read_text(encoding="utf-8"))
+            self.assertEqual(saved, output)
+            self.assertEqual(saved["origin"], "obsidian-vault")
+            self.assertEqual(len(saved["nodes"]), 2)
+            node_ids = {node["id"] for node in saved["nodes"]}
+            self.assertEqual(node_ids, {"A.md", "B.md"})
+            self.assertTrue(all((vault / node_id).is_file() for node_id in node_ids))
+            self.assertFalse(any("note-0135" in node_id for node_id in node_ids))
+            self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(cache.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(list(cache.parent.iterdir()), [cache])
+
     def test_watcher_reports_markdown_and_ignores_non_markdown(self):
         with tempfile.TemporaryDirectory(prefix="graph-watch-") as temporary:
             vault = pathlib.Path(temporary) / "vault"
