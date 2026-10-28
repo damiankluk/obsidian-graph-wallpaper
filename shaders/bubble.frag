@@ -30,5 +30,7 @@ void main() {
     float phase = (texCoord.x + texCoord.y * 0.41) * 25.0 - elapsedTime * (1.4 + thoughtLevel * 2.0);
     float travelingGlow = smoothstep(-0.15, 0.9, sin(phase)) * (0.28 + thoughtLevel * 0.72);
     graph.rgb += vec3(0.26, 0.54, 0.90) * bluePath * travelingGlow * graph.a;
+    float agentFlow = smoothstep(-0.15, 0.9, sin(phase + 0.8));
+    graph.rgb += vec3(0.40, 0.72, 1.25) * bluePath * agentLevel * agentFlow * graph.a;
     fragColor = graph * qt_Opacity;
 }

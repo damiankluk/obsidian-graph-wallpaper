@@ -2,12 +2,12 @@
   "schema": 1,
   "shaders": {
     "bubble.vert.qsb": {
-      "source_sha256": "bd807c542d13ec42c489b1a1ec936b07c955cd765db3da931d3c45a9391c9eaf",
-      "artifact_sha256": "d58f3d71804198b0f44148f288552e54938e742b916f8d59de6649f0fd87fd5b"
+      "source_sha256": "af1958acba5006a032886aa7288f4756f68e4237528f2f905d68ebb65903a368",
+      "artifact_sha256": "22696cb2df0e8c7767167f4830d07ff51247db25fb86ecc0509919aa004f24ca"
     },
     "bubble.frag.qsb": {
-      "source_sha256": "ccde29ae5bc349a912e4cd4354bd8456cd9cb49c2f67e872a5616d75723667c0",
-      "artifact_sha256": "bacba069ba8432eeed40cb1917dc294269fd4dab3f8967ab7de87fd5d1603aec"
+      "source_sha256": "ba359af457ef27edc51f22b62e15aa1aa9fb30922efb81a5f428f6b17bd56fa0",
+      "artifact_sha256": "97bece4e82e342e7984ab0fef44fac1111bb3f78e88d5e0b64e6d56ff9358be8"
     }
   }
 }
