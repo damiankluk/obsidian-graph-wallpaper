@@ -97,7 +97,7 @@ class CadenceTests(unittest.TestCase):
     def test_pulse_follows_the_agent_level(self):
         idle_pulse, agent_pulse = self.probe["pulse"]
         self.assertEqual(idle_pulse, 0)
-        self.assertAlmostEqual(agent_pulse, 0.70 + (math.sin(0) + 1) * 0.35, places=9)
+        self.assertAlmostEqual(agent_pulse, 0.55 + (math.sin(0) + 1) * 0.075, places=9)
 
 
 if __name__ == "__main__":

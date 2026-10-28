@@ -10,6 +10,7 @@ layout(std140, binding = 0) uniform buf {
     float rasterMotionClock;
     float elapsedTime;
     float thoughtLevel;
+    float agentLevel;
     float pointerYaw;
     float pointerPitch;
     float rasterPointerYaw;

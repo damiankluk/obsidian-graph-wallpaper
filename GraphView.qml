@@ -470,9 +470,7 @@ Item {
     var cp = Math.cos(pitch + pointerPitch), sp = Math.sin(pitch + pointerPitch)
     var cr = Math.cos(roll), sr = Math.sin(roll)
     var projectionRadius = Math.min(drawWidth, drawHeight) * 0.34
-    // The active-agent pulse should read as a breathing sphere, not a tiny
-    // scale shimmer. Scaling remains a single scalar shared by all nodes.
-    var graphScale = 1 + pulse * 0.045
+    var graphScale = 1 + pulse * 0.012
     var centerX = drawWidth * 0.5, centerY = drawHeight * 0.5
     for (var i = 0; i < nodes.length; i++) {
       var waveMotion = 0, radialMotion = 0, tangentMotion = 0
@@ -903,6 +901,7 @@ Item {
     property real rasterMotionClock: root.paintedMotionClock
     property real elapsedTime: root.elapsedSeconds
     property real thoughtLevel: root.thoughtLevel
+    property real agentLevel: root.agentLevel
     property real pointerYaw: root.pointerYaw
     property real pointerPitch: root.pointerPitch
     property real rasterPointerYaw: root.rasterPointerYaw

@@ -38,7 +38,5 @@ function pose(time) {
 }
 
 function pulse(level, time) {
-  // Keep the agent's whole-sphere breath clearly visible at native scale.
-  // This is a single uniform scalar; it adds no per-node or per-frame work.
-  return level * (0.70 + (Math.sin(time * 1.04) + 1) * 0.35)
+  return level * (0.55 + (Math.sin(time * 1.04) + 1) * 0.075)
 }

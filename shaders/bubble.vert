@@ -11,6 +11,7 @@ layout(std140, binding = 0) uniform buf {
     float rasterMotionClock;
     float elapsedTime;
     float thoughtLevel;
+    float agentLevel;
     float pointerYaw;
     float pointerPitch;
     float rasterPointerYaw;
@@ -80,6 +81,11 @@ void main() {
     float keyDistance = length(corrected) / radius;
     float keyRing = sin(keyDistance * 17.0 - elapsedTime * 3.0);
     corrected += direction * (keyRing * keyboardLevel * 2.4 * body);
+
+    // A shared, shader-only breath makes AI activity legible across the full
+    // sphere. It moves the existing mesh without rerasterizing Canvas nodes.
+    float agentBreath = sin(elapsedTime * 1.04);
+    corrected *= 1.0 + 0.034 * agentLevel * agentBreath;
 
     gl_Position = qt_Matrix * vec4(center + corrected, 0.0, 1.0);
     texCoord = qt_MultiTexCoord0;
