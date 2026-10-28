@@ -8,12 +8,13 @@ An animated, local-only graph wallpaper for an Obsidian vault. It projects linke
 
 - Reads Markdown note names and local links from one configured Obsidian vault.
 - Supports Obsidian wikilinks and ordinary Markdown links between notes.
-- Projects a graph of local Markdown notes in Quickshell Canvas and uses a Qt ShaderEffect for the live orbit, liquid-like motion, and traveling link glow; it does not require QtQuick3D, WebGL, a CDN, or network access.
+- Builds the graph mesh once per vault generation with Qt Quick 3D; GPU shaders animate the sphere, flow light along real links, and add listening ripples. It creates no per-note or per-link QML objects.
+- Builds changed graph generations in short event-loop slices while keeping the last complete mesh on screen. Mesh buffers swap only after the replacement is ready, avoiding a long synchronous pause during live vault updates.
 - Defaults to the display with the largest pixel area. Set `OMARCHY_OBSIDIAN_GRAPH_OUTPUT` to a connector name (for example `DP-2`) to pick a display explicitly.
-- Responds to keyboard or pointer activity with a faster orbit; moving the pointer over the exposed desktop adds gentle camera parallax. When an Obsidian window is focused, the matching note node is highlighted by title.
+- Idle drift and activity share one eased orbit response: keyboard, pointer movement, or an active agent gradually raises the motion, then it settles back smoothly. Pointer motion also adds gentle camera parallax and a local listening ripple; keyboard activity adds a subtler center ripple. When an Obsidian window is focused, the matching note node is highlighted by title.
 - Watches Markdown files with Linux inotify and refreshes the graph shortly after a save; a bounded five-minute scan recovers from missed watcher events. If the vault is not mounted, it retries every ten seconds. Call `omarchy-shell io.github.damiankluk.obsidian-graph refresh` to refresh manually; this updates the existing surface without restarting the shell.
 - Highlights recently edited notes briefly. Optional lifecycle hooks for Codex, Claude Code, and Antigravity make the whole graph breathe gently while an agent turn is active; the effect eases in and out without a separate activity badge.
-- Targets a fixed 30 fps while idle and 60 fps while listening or an agent is working. Canvas rerasterizes on graph or highlight changes; the shader animates between those updates. Motion uses a 3D-style image-space warp of the perspective graph texture, keeping the animation on the GPU instead of redrawing every node in JavaScript each frame. A 30-second live-vault run on an RTX 2060 SUPER at 2560×1440 measured 2.2% CPU idle / 3.1% active with no RSS growth; `frameSwapped` averages were 30/60 per second, while p99 intervals were 41/21 ms, so tighter frame pacing remains a tuning target.
+- Targets 30 fps while idle and 60 fps while listening or an agent is working. Motion runs on the GPU over static graph geometry; changed graph data is built in small QML slices and swapped as one completed generation. Timer callbacks and `frameSwapped` measurements are not proof of compositor scanout.
 - Reads agent state from its small runtime JSON file with Quickshell's file watcher and expires stale leases in-process. A 15-second recovery read handles missed atomic file replacements without launching a Python process every second.
 - Sends a faint thought wave from recently changed notes through at most two link hops and 24 nodes, repeating every five seconds while an agent is active. If no note changed yet, the wave starts at the most-connected note but remains bounded. A uniquely matched focused note brightens its direct neighbors and links; duplicate titles leave the graph unchanged.
 - Keeps a private, short-lived graph cache under `$XDG_RUNTIME_DIR/obsidian-graph/` so the wallpaper can return immediately after a shell restart. It contains note labels and links, never note bodies, and is removed when the user session ends.
@@ -24,8 +25,8 @@ This is a wallpaper visualization, not an interactive Obsidian workspace. It doe
 ## Requirements
 
 - Omarchy Quattro shell plugins.
-- Python 3 and GNU Coreutils `timeout`.
-- No extra Python packages, QtQuick3D module, credentials, or network connection.
+- Qt 6.12 Qt Quick 3D (`qt6-quick3d` on Arch), Python 3, and GNU Coreutils `timeout`.
+- No credentials or network connection.
 - Linux inotify support (provided by the kernel; no `inotify-tools` package required).
 
 ## Install
@@ -36,7 +37,7 @@ omarchy plugin add https://github.com/damiankluk/obsidian-graph-wallpaper.git --
 
 To install a local checkout manually, copy the repository to `~/.config/omarchy/plugins/io.github.damiankluk.obsidian-graph/`, run `omarchy-shell shell rescanPlugins`, then run `omarchy plugin enable io.github.damiankluk.obsidian-graph`.
 
-The graph service stays mounted across plugin rescans to avoid blanking its display. When updating the service's QML or Python code, restart the Omarchy shell once to load the new code; the wallpaper returns from its runtime cache. A full shell restart briefly removes all layer surfaces, so Hyprland uses a matching dark fallback color during that interval.
+QML releases are packaged under a content-addressed runtime path. This gives changed service, graph-view, and shader files new URLs so Qt cannot silently reuse a stale compiled component after an Omarchy plugin rescan. Run `python3 scripts/package_runtime.py --write` after changing runtime QML or shader sources; it updates the manifest entry point and verifies the packaged snapshot. The plugin's normal file watcher then reloads only this service; it does not restart the Omarchy shell or touch the other monitor.
 
 ### Optional agent activity pulse
 
@@ -76,6 +77,12 @@ python3 scripts/validate_manifest.py .
 omarchy plugin validate .
 ```
 
-`bash tests/run` runs portable checks, cadence simulation, shader-pack verification, and manifest validation. `python3 bench/run_benchmark.py --states idle,agent --duration 60` measures only real notes from the configured vault by default; synthetic stress fixtures are explicit with `--fixture approved` or `--fixture limit`. The timing probe records Quickshell `frameSwapped` timestamps, not compositor presentation or scanout.
+`bash tests/run` runs portable checks, cadence simulation, the 3D shader contract checks, runtime-package consistency, and manifest validation. `python3 bench/run_benchmark.py --states idle,agent --duration 60` measures only real notes from the configured vault by default. Synthetic stress fixtures are available for isolated development checks, and are never written to the production vault cache. The timing probe records Quickshell `frameSwapped` timestamps, not compositor presentation or scanout.
+
+To measure a live geometry-generation swap in isolation, use a synthetic fixture and request one note/link addition during measurement:
+
+```bash
+python3 bench/run_benchmark.py --fixture approved --states idle --duration 10 --geometry-refresh 3
+```
 
 See [LICENSE](LICENSE) for the MIT license. This repository is a community plugin candidate; a marketplace listing requires separate maintainer review and approval.

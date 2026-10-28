@@ -1,58 +1,62 @@
 #!/usr/bin/env python3
-"""Shader artifacts stay in sync with their sources.
-
-shaders/build.py bakes the .qsb files from the GLSL sources with Qt's qsb and
-records source and artifact hashes in shaders/BUILD.json. The hash check needs
-no Qt tools; the rebuild check runs only where qsb is installed.
-"""
+"""Contract checks for the single Qt Quick 3D graph renderer."""
 
 from __future__ import annotations
 
 import pathlib
-import subprocess
-import sys
-import tempfile
+import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "shaders"))
-import build  # noqa: E402
 
 
-class ShaderBuildTests(unittest.TestCase):
-    def test_every_artifact_is_listed_and_matches_its_recorded_hashes(self):
-        self.assertEqual(build.check(), [])
+class GraphRendererTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qml = (ROOT / "Graph3DView.qml").read_text(encoding="utf-8")
+        cls.vertex = (ROOT / "shaders/graph3d.vert").read_text(encoding="utf-8")
+        cls.fragment = (ROOT / "shaders/graph3d.frag").read_text(encoding="utf-8")
 
-    def test_stale_source_is_reported(self):
-        manifest = build.load_manifest()
-        name = next(iter(manifest["shaders"]))
-        manifest["shaders"][name]["source_sha256"] = "0" * 64
-        problems = build.check(manifest)
-        self.assertEqual(len(problems), 1)
-        self.assertIn(name, problems[0])
+    def test_real_scene_uses_batched_procedural_geometry(self):
+        self.assertIn("import QtQuick3D", self.qml)
+        self.assertIn("import QtQuick3D.Helpers", self.qml)
+        self.assertEqual(self.qml.count("ProceduralMesh {"), 2)
+        self.assertEqual(self.qml.count("geometry: nodeGeometry"), 1)
+        self.assertEqual(self.qml.count("geometry: edgeGeometry"), 1)
+        self.assertNotIn("Canvas {", self.qml)
+        self.assertNotIn("Repeater3D", self.qml)
+        self.assertIn("primitiveMode: ProceduralMesh.Lines", self.qml)
 
-    def test_bubble_shader_pair_is_present(self):
-        names = set(build.load_manifest()["shaders"])
-        for expected in ("bubble.vert.qsb", "bubble.frag.qsb"):
-            self.assertIn(expected, names)
-            self.assertTrue((ROOT / "shaders" / expected).is_file())
+    def test_vertex_shader_outputs_a_real_3d_position(self):
+        for axis in ("rotateY", "rotateX", "rotateZ"):
+            self.assertIn(axis, self.vertex)
+        self.assertIn("POSITION = MODELVIEWPROJECTION_MATRIX * vec4(p, 1.0)", self.vertex)
+        self.assertIn("float radialDisplacement", self.vertex)
+        self.assertIn("float depthVisibility", self.fragment)
+        self.assertNotIn("vec3(local / radius, 0.0)", self.vertex)
 
-    @unittest.skipUnless(build.find_qsb(), "qsb not installed")
-    def test_rebuild_from_sources_reproduces_committed_artifacts(self):
-        with tempfile.TemporaryDirectory(prefix="ogshader-") as out:
-            build.build_all(pathlib.Path(out))
-            for name in build.load_manifest()["shaders"]:
-                self.assertEqual((pathlib.Path(out) / name).read_bytes(), (ROOT / "shaders" / name).read_bytes(),
-                                 f"{name} differs from a fresh bake; run python3 shaders/build.py")
+    def test_agent_and_listening_motion_are_gpu_driven(self):
+        for token in ("uAgent", "uWavePhaseA", "uWavePhaseB", "uBreathPhase"):
+            self.assertIn(token, self.vertex)
+        for token in ("uPointerLevel", "uKeyboardLevel", "uPointerPhase"):
+            self.assertIn(token, self.vertex)
+        self.assertIn("uAgent *", self.fragment)
+        self.assertIn("uFlowPhase", self.fragment)
 
-    @unittest.skipUnless(build.find_qsb(), "qsb not installed")
-    def test_artifacts_target_the_qt_quick_backends(self):
-        qsb = build.find_qsb()
-        result = subprocess.run([qsb, "-d", str(ROOT / "shaders" / "bubble.vert.qsb")],
-                                capture_output=True, text=True, check=True)
-        info = result.stdout + result.stderr
-        for target in ("SPIR-V", "GLSL 100 es", "GLSL 120", "GLSL 150", "HLSL 50", "MSL 12"):
-            self.assertIn(target, info)
+    def test_every_shader_uniform_has_a_qml_property(self):
+        properties = set(re.findall(r"property\s+(?:real|vector3d)\s+(u\w+)", self.qml))
+        shader_names = set(re.findall(r"\bu[A-Z]\w*\b", self.vertex + self.fragment))
+        self.assertEqual(shader_names - properties, set())
+
+    def test_graph_arrays_are_released_after_mesh_upload(self):
+        build = self.qml[self.qml.index("function rebuildGeometry"):self.qml.index("function updateLabels")]
+        self.assertIn("geometryBuildTimer.restart()", build)
+        self.assertIn("GraphGeometry.build(state.graph", build)
+        self.assertIn("nodeGeometry.positions = state.converted.nodepositions", build)
+        self.assertIn("edgeGeometry.positions = state.converted.edgepositions", build)
+        self.assertIn("geometryBuild = null", build)
+        self.assertIn("geometryData = { nodeCount: state.nodeCount, edgeCount: state.builtEdgeCount }", build)
+        self.assertNotIn("geometryData = next", build)
 
 
 if __name__ == "__main__":

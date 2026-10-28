@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Repeatable graph benchmark: real GraphView, synthetic fixture and activity state.
+"""Repeatable graph benchmark: production graph renderer, synthetic fixture and activity state.
 
 Usage: bench/run_benchmark.py [--fixture approved|limit] [--states idle,agent,...]
                               [--duration 60] [--warmup 3] [--output DP-2]
-                              [--layer bottom|top] [--probe on|off] [--results-dir DIR]
+                              [--layer bottom|top] [--probe on|off] [--gpu-sampling on|off]
+                              [--geometry-refresh 3]
+                              [--results-dir DIR]
 
 Each state runs in its own `quickshell -p bench/shell.qml` process so CPU and
 memory are attributable to that process. Only synthetic state is injected; no
@@ -14,6 +16,7 @@ cannot be observed is recorded in the report as unavailable, never guessed.
 from __future__ import annotations
 
 import argparse
+import collections
 import datetime
 import json
 import os
@@ -116,13 +119,13 @@ PLUGIN_ROOT = HERE.parent
 
 
 def stage_shell(out_dir: pathlib.Path) -> pathlib.Path:
-    """Config folder for Quickshell: the bench shell beside symlinks to the real view and shaders.
+    """Config folder for Quickshell: bench shell beside symlinks to production QML and shaders.
 
     Quickshell cannot import a parent directory, and symlinks keep the measured
-    code byte-for-byte the plugin's own GraphView.qml and shaders as found.
+    code byte-for-byte the plugin's own renderer sources as found.
     """
     stage = out_dir  # a temp dir outside the plugin: symlinks inside it fail plugin validation
-    for name in ("GraphView.qml", "Cadence.js", "shaders"):
+    for name in ("Graph3DView.qml", "GraphGeometry.js", "Cadence.js", "shaders"):
         link = stage / name
         if not link.is_symlink():
             link.symlink_to(PLUGIN_ROOT / name)
@@ -134,19 +137,26 @@ def stage_shell(out_dir: pathlib.Path) -> pathlib.Path:
 class Run:
     """One quickshell child: line queue plus /proc sampling."""
 
-    def __init__(self, command: list[str], env: dict):
+    def __init__(self, command: list[str], env: dict, qml_gc_log: pathlib.Path | None = None):
         self.process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                         text=True, bufsize=1, start_new_session=True)
+        self.qml_gc_log = qml_gc_log
         self.lines: queue.Queue[str] = queue.Queue()
         self.tail: list[str] = []
         threading.Thread(target=self._pump, daemon=True).start()
 
     def _pump(self):
+        qml_gc_file = self.qml_gc_log.open("w", encoding="utf-8") if self.qml_gc_log else None
         for line in self.process.stdout:
             self.tail = (self.tail + [line.rstrip()])[-30:]
+            if qml_gc_file and "qt.qml.gc." in line:
+                qml_gc_file.write(line)
+                qml_gc_file.flush()
             if "OGBENCH" in line:
                 self.lines.put(line.rstrip())
         self.lines.put("OGBENCH eof")
+        if qml_gc_file:
+            qml_gc_file.close()
 
     def wait_for(self, kind: str, timeout: float) -> str:
         deadline = time.monotonic() + timeout
@@ -175,6 +185,10 @@ class Run:
             if line.startswith("VmRSS:"):
                 return int(line.split()[1])
         raise RuntimeError("VmRSS not found")
+
+    def memory_breakdown_kib(self) -> dict[str, int]:
+        text = pathlib.Path(f"/proc/{self.process.pid}/smaps_rollup").read_text()
+        return benchlib.parse_smaps_rollup(text)
 
     def stop(self):
         if self.process.poll() is None:
@@ -219,28 +233,58 @@ def measure_state(state: str, args, fixture_path: pathlib.Path, out_dir: pathlib
     env = dict(os.environ,
                OGBENCH_FIXTURE=str(fixture_path), OGBENCH_STATE=state, OGBENCH_DURATION=str(args.duration),
                OGBENCH_WARMUP=str(args.warmup), OGBENCH_LAYER=args.layer, OGBENCH_PROBE=args.probe,
-               OGBENCH_OUTPUT=output or "")
-    run = Run(["quickshell", "-p", str(shell)], env)
+               OGBENCH_OUTPUT=output or "", OGBENCH_SURFACE=args.surface,
+               OGBENCH_GEOMETRY_REFRESH=str(args.geometry_refresh))
+    if args.qml_gc_logs:
+        existing_rules = env.get("QT_LOGGING_RULES", "")
+        gc_rules = "qt.qml.gc.statistics.debug=true;qt.qml.gc.allocatorStats.debug=true"
+        env["QT_LOGGING_RULES"] = f"{existing_rules};{gc_rules}" if existing_rules else gc_rules
+    capture_path = out_dir / f"{state}.png" if args.capture else None
+    if capture_path:
+        env["OGBENCH_CAPTURE_PATH"] = str(capture_path)
+    qml_gc_log = out_dir / f"{state}.qml-gc.log" if args.qml_gc_logs else None
+    run = Run(["quickshell", "-p", str(shell)], env, qml_gc_log)
     pmon = None
     try:
         run.wait_for("ready", 60)
         run.wait_for("start", args.warmup + 30)
         t0 = time.monotonic()
-        ticks0, rss, gpu = run.cpu_ticks(), [run.rss_kib()], []
+        ticks0, rss, memory_breakdown, gpu = run.cpu_ticks(), [run.rss_kib()], [run.memory_breakdown_kib()], []
+        memory_samples = [{"elapsed_s": 0.0, "rss_kib": rss[0], **memory_breakdown[0]}]
         pmon = (subprocess.Popen(["nvidia-smi", "pmon", "-s", "u", "-d", "1", "-c", str(int(args.duration))],
                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-                if shutil.which("nvidia-smi") else None)
-        shot = None
+                if args.gpu_sampling == "on" and shutil.which("nvidia-smi") else None)
         while time.monotonic() - t0 < args.duration:
             time.sleep(1)
             rss.append(run.rss_kib())
-            sample = gpu_sample()
+            memory_breakdown.append(run.memory_breakdown_kib())
+            memory_samples.append({"elapsed_s": round(time.monotonic() - t0, 3), "rss_kib": rss[-1],
+                                   **memory_breakdown[-1]})
+            sample = gpu_sample() if args.gpu_sampling == "on" else None
             if sample:
                 gpu.append(sample)
         elapsed = time.monotonic() - t0
         ticks1 = run.cpu_ticks()
         result = json.loads(run.wait_for("result", 30))
+        frame_times = [float(value) for value in result.get("frame_time_ms", [])]
+        frame_targets = [int(value) for value in result.get("frame_target_ms", [])]
+        frame_timing = None
+        if frame_times:
+            ordered_times = sorted(frame_times)
+            frame_timing = {
+                "callbacks": len(frame_times),
+                "mean_hz": round(1000 / (sum(frame_times) / len(frame_times)), 2),
+                "p50_ms": round(benchlib.percentile(ordered_times, 0.50), 3),
+                "p95_ms": round(benchlib.percentile(ordered_times, 0.95), 3),
+                "p99_ms": round(benchlib.percentile(ordered_times, 0.99), 3),
+                "max_ms": round(ordered_times[-1], 3),
+                "common_intervals_ms": collections.Counter(round(value, 2) for value in frame_times).most_common(6),
+            }
+            if state == benchlib.TRANSITION_STATE:
+                frame_timing["transition"] = benchlib.transition_frame_stats(frame_times, frame_targets)
+            (out_dir / f"{state}.frame-times.json").write_text(json.dumps(frame_times), encoding="utf-8")
         pmon_rows = pmon.communicate(timeout=10)[0].splitlines() if pmon else []
+        shot = capture_path if capture_path and capture_path.is_file() else None
     except Exception as exc:
         raise RuntimeError(f"{exc}; shell exit={run.process.poll()}; last shell output: {' | '.join(run.tail[-8:])}") from exc
     finally:
@@ -251,23 +295,40 @@ def measure_state(state: str, args, fixture_path: pathlib.Path, out_dir: pathlib
     def mean(key):
         return round(sum(s[key] for s in gpu) / len(gpu), 2) if gpu else None
 
+    memory_samples_path = out_dir / f"{state}.memory-samples.jsonl"
+    memory_samples_path.write_text("".join(json.dumps(sample, separators=(",", ":")) + "\n"
+                                          for sample in memory_samples), encoding="utf-8")
+    late_samples = memory_samples[len(memory_samples) // 2:]
+
     process_cost = {
         "shell_cpu_percent_of_one_core": round(benchlib.cpu_percent(ticks0, ticks1, elapsed, CLOCK_TICKS), 2),
         "shell_cpu_ticks": ticks1 - ticks0,
         "rss": benchlib.rss_growth(rss),
+        "rss_late_window": benchlib.rss_growth([sample["rss_kib"] for sample in late_samples]),
+        "memory_breakdown_kib": {
+            key: benchlib.rss_growth([sample[key] for sample in memory_breakdown if key in sample])
+            for key in memory_breakdown[0]
+        },
         "gpu_whole_device": {
             "samples": len(gpu), "util_mean": mean("gpu_util"),
             "util_max": max((s["gpu_util"] for s in gpu), default=None),
             "mem_used_mib_mean": mean("mem_used_mib"), "power_w_mean": mean("power_w"),
         } if gpu else None,
-        "gpu_this_process": process_gpu(run.process.pid, pmon_rows),
+        "gpu_this_process": process_gpu(run.process.pid, pmon_rows) if args.gpu_sampling == "on" else None,
         "screenshot": str(shot) if shot else None,
+        "qml_gc_log": str(qml_gc_log) if qml_gc_log and qml_gc_log.exists() else None,
+        "memory_samples": str(memory_samples_path),
         "measured_seconds": round(elapsed, 2),
     }
     base = {"state": state, "probe": args.probe, "nodes": result["nodes"], "edges": result["edges"],
-            "screen": result["screen"], "view": result["view"]}
+            "screen": result["screen"], "view": result["view"], "frame_timing": frame_timing,
+            "geometry_refresh_triggered": result.get("geometryRefreshTriggered", False),
+            "motion_levels": result.get("motion_levels"),
+            "listening_levels": result.get("listening_levels")}
     if args.probe == "off":
         # Control run: no frame statistics exist by construction.
+        return {**base, **process_cost}
+    if state == benchlib.TRANSITION_STATE:
         return {**base, **process_cost}
     raw = result["intervals_ms"]
     (out_dir / f"{state}.intervals.json").write_text(json.dumps(raw), encoding="utf-8")
@@ -287,25 +348,80 @@ def format_report(report: dict) -> str:
     env = report["environment"]
     lines = [f"# Graph benchmark {report['timestamp']}", "",
              f"Fixture: {report['fixture']} ({report['nodes']} notes / {report['edges']} links), "
-             f"{report['duration_s']} s per state after {report['warmup_s']} s warm-up, layer={report['layer']}", "",
+             f"{report['duration_s']} s per state after {report['warmup_s']} s warm-up, "
+             f"layer={report['layer']}, surface={report['surface']}", "",
              "## Environment (limits on these numbers)"]
     for key, value in env.items():
         lines.append(f"- {key}: {value if value is not None else 'unavailable'}")
+    if report.get("geometry_refresh_after_s") is not None:
+        lines.append(f"- synthetic geometry change after {report['geometry_refresh_after_s']} s: "
+                     f"{'triggered' if any(s.get('geometry_refresh_triggered') for s in report['states']) else 'not observed'}")
+    if any(r.get("listening_levels") for r in report["states"]):
+        lines += ["", "## Rendered listening envelopes at measurement end",
+                  "These values confirm that injected pointer and keyboard activity reached the real 3D view.",
+                  "| state | pointer level | keyboard level |", "|---|---|---|"]
+        for r in report["states"]:
+            levels = r.get("listening_levels") or {}
+            lines.append(f"| {r['state']} | {levels.get('pointer', 'unavailable')} | "
+                         f"{levels.get('keyboard', 'unavailable')} |")
+    if any(r.get("motion_levels") for r in report["states"]):
+        lines += ["", "## Rendered motion envelopes at measurement end",
+                  "Levels are the smoothed inputs that drive GPU deformation and listening ripples.",
+                  "| state | agent | pointer | keyboard |", "|---|---:|---:|---:|"]
+        for r in report["states"]:
+            levels = r.get("motion_levels") or {}
+            lines.append(f"| {r['state']} | {levels.get('agent', 'unavailable')} | "
+                         f"{levels.get('pointer', 'unavailable')} | {levels.get('keyboard', 'unavailable')} |")
     if report.get("probe") == "off":
         lines += ["", "## Process cost with the frame probe OFF (control run)",
                   "No interval storage, no frameSwapped handler, no frame statistics. CPU is /proc utime+stime in",
                   f"clock ticks (1 tick = {1000 // CLOCK_TICKS} ms of CPU), so one tick over the run is a quantization step.",
-                  "| state | CPU ticks | CPU % core | whole-GPU util % (not attributable) | RSS growth KiB |",
-                  "|---|---|---|---|---|"]
+                  "| state | CPU ticks | CPU % core | whole-GPU util % (not attributable) | RSS growth KiB | private dirty growth KiB | anonymous growth KiB |",
+                  "|---|---|---|---|---|---|---|"]
         for r in report["states"]:
             g = r["gpu_whole_device"]
+            memory = r.get("memory_breakdown_kib") or {}
+            private_dirty = memory.get("Private_Dirty", {}).get("growth_kib", "n/a")
+            anonymous = memory.get("Anonymous", {}).get("growth_kib", "n/a")
             lines.append(f"| {r['state']} | {r['shell_cpu_ticks']} | {r['shell_cpu_percent_of_one_core']} | "
-                         f"{g['util_mean'] if g else 'n/a'} | {r['rss'].get('growth_kib', 'n/a')} |")
+                         f"{g['util_mean'] if g else 'n/a'} | {r['rss'].get('growth_kib', 'n/a')} | "
+                         f"{private_dirty} | {anonymous} |")
         return "\n".join(lines) + "\n"
+    lines += ["", "## Animation timer intervals (QML `Timer`, sampled per callback)",
+              "This measures elapsed time between scene-timer callbacks, separately from buffer swaps and scanout.",
+              "| state | callbacks | mean Hz | p50 ms | p95 ms | p99 ms | max ms | common callback intervals (ms) |",
+              "|---|---|---|---|---|---|---|---|"]
+    for r in report["states"]:
+        f = r.get("frame_timing")
+        if not f:
+            lines.append(f"| {r['state']} | unavailable | - | - | - | - | - | - |")
+            continue
+        common = ", ".join(f"{value}: {count}" for value, count in f["common_intervals_ms"])
+        lines.append(f"| {r['state']} | {f['callbacks']} | {f['mean_hz']} | {f['p50_ms']} | {f['p95_ms']} | "
+                     f"{f['p99_ms']} | {f['max_ms']} | {common} |")
+
+    transitions = [r for r in report["states"] if r["state"] == benchlib.TRANSITION_STATE]
+    if transitions:
+        lines += ["", "## Cadence switches (30/60 Hz timer targets)",
+                  "Intervals are grouped by the timer target active on each callback; switch intervals show the callback gap across a cadence change.",
+                  "| cadence | callbacks | p99 ms | max ms | missed | >2x |", "|---|---|---|---|---|---|"]
+        for r in transitions:
+            detail = (r.get("frame_timing") or {}).get("transition") or {}
+            for target, stats in detail.get("groups", {}).items():
+                lines.append(f"| {1000 / int(target):.0f} FPS | {stats['frames']} | {stats['p99_ms']} | {stats['max_ms']} | "
+                             f"{stats['missed_frames']} | {stats['over_2x']} |")
+            switch_max = detail.get("cadence_switch_max_ms")
+            lines.append(f"| switch boundary | - | - | {switch_max if switch_max is not None else 'n/a'} | - | - |")
+            for direction, count in detail.get("cadence_switch_counts", {}).items():
+                lines.append(f"| {direction} ms target | {count} changes | - | "
+                             f"{detail['cadence_switch_maxima_ms'][direction]} | - | - |")
+
     lines += ["", "## Raw frameSwapped intervals (ms), judged against the shipped 30/60 Hz cadence",
               "| state | swap intervals | mean swaps/s | p50 | p95 | p99 | max | missed | >2x | CPU % core | whole-GPU util % (not attributable) | per-process SM % (sparse, indicative) | RSS growth KiB |",
               "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in report["states"]:
+        if r["state"] == benchlib.TRANSITION_STATE:
+            continue
         f = r["frames_current_cadence"]
         if "error" in f:
             lines.append(f"| {r['state']} | 0 | - | - | - | - | - | - | - | {r['shell_cpu_percent_of_one_core']} | - | - | - |")
@@ -327,6 +443,8 @@ def format_report(report: dict) -> str:
               "| state | swap events | absorbed | bursts | est. redraws/s | p50 | p95 | p99 | max | missed | >2x |",
               "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in report["states"]:
+        if r["state"] == benchlib.TRANSITION_STATE:
+            continue
         f = r["paints_current_cadence"]
         if "error" in f:
             continue
@@ -336,6 +454,8 @@ def format_report(report: dict) -> str:
     lines += ["", "## Same intervals judged against the TARGET 30/60 Hz cadence (raw swaps, then coalesced bursts)",
               "| state | nominal ms | p99 | p99 within 20% | missed | >2x |", "|---|---|---|---|---|---|"]
     for r in report["states"]:
+        if r["state"] == benchlib.TRANSITION_STATE:
+            continue
         f = r["frames_target_cadence"]
         if "error" in f:
             continue
@@ -345,12 +465,23 @@ def format_report(report: dict) -> str:
         if "error" not in c:
             lines.append(f"| {r['state']} (bursts) | {c['nominal_ms']} | {c['p99_ms']} | {c['p99_within_20pct']} | "
                          f"{c['missed_frames']} | {c['over_2x']} |")
-    lines += ["", "## GPU notes",
-              "Whole-GPU util/memory/power cover every client (compositor, Xwayland, other shells, browsers), so they",
-              "cannot be attributed to the wallpaper. Per-process SM % is from 1 s `nvidia-smi pmon` samples and only a",
-              "handful were attributed to the shell pid; treat as indicative.", "",
-              "## Screenshots", "None captured during this performance run."]
-    lines += [f"- {r['state']}: none" for r in report["states"]]
+    if report.get("gpu_sampling", "on") == "on":
+        lines += ["", "## GPU notes",
+                  "Whole-GPU util/memory/power cover every client (compositor, Xwayland, other shells, browsers), so they",
+                  "cannot be attributed to the wallpaper. Per-process SM % is from 1 s `nvidia-smi pmon` samples and only a",
+                  "handful were attributed to the shell pid; treat as indicative.", "",
+                  "GPU sampling can perturb driver scheduling; compare with a run using `--gpu-sampling off`.", "",
+              "## Screenshots"]
+    else:
+        lines += ["", "## GPU notes", "GPU polling was disabled during this run to avoid driver-query interference.", "",
+                  "## Screenshots"]
+    captured = [r for r in report["states"] if r.get("screenshot")]
+    if captured:
+        lines.append("Captured from the real 3D view at native item size after warm-up and before timing.")
+        lines.extend(f"- {r['state']}: `{pathlib.Path(r['screenshot']).name}`" for r in captured)
+    else:
+        lines.append("None captured. Re-run with `--capture` to save a native-size 3D view image per state.")
+        lines.extend(f"- {r['state']}: none" for r in report["states"])
     return "\n".join(lines) + "\n"
 
 
@@ -363,17 +494,31 @@ def main() -> int:
     parser.add_argument("--states", default=",".join(benchlib.STATES))
     parser.add_argument("--duration", type=float, default=60)
     parser.add_argument("--warmup", type=float, default=3)
+    parser.add_argument("--geometry-refresh", type=float, default=0,
+                        help="add one synthetic note/link after this many measured seconds; use a synthetic fixture")
     parser.add_argument("--output", help="monitor name (default: largest by pixel area)")
     parser.add_argument("--layer", choices=("bottom", "top"), default="bottom")
+    parser.add_argument("--surface", choices=("compact", "full"), default="compact",
+                        help="compact matches the installed 1520 px production layer surface")
     parser.add_argument("--probe", choices=("on", "off"), default="on",
                         help="off: leave the frame probe unused (A/B control); only CPU/RSS/GPU are reported")
+    parser.add_argument("--gpu-sampling", choices=("on", "off"), default="on",
+                        help="off: skip nvidia-smi polling during timing to isolate its impact")
+    parser.add_argument("--capture", action="store_true",
+                        help="save a native-size 3D view image after warm-up, before timing starts")
+    parser.add_argument("--qml-gc-logs", action="store_true",
+                        help="enable Qt QML garbage-collector diagnostics and save only qt.qml.gc.* log lines")
     parser.add_argument("--results-dir", type=pathlib.Path, default=HERE / "results")
     args = parser.parse_args()
 
     states = args.states.split(",")
-    unknown = [s for s in states if s not in benchlib.STATES]
+    unknown = [s for s in states if s not in (*benchlib.STATES, benchlib.TRANSITION_STATE)]
     if unknown:
         parser.error(f"unknown states: {unknown}")
+    if args.geometry_refresh < 0 or args.geometry_refresh >= args.duration:
+        parser.error("--geometry-refresh must be >= 0 and less than --duration")
+    if args.geometry_refresh > 0 and args.fixture == "vault":
+        parser.error("--geometry-refresh requires an explicit synthetic fixture")
     for tool in ("quickshell",):
         if shutil.which(tool) is None:
             print(f"required tool not found: {tool}", file=sys.stderr)
@@ -399,7 +544,11 @@ def main() -> int:
     output = env["target_output"]
     report = {"timestamp": stamp, "fixture": fixture_name, "nodes": len(fixture["nodes"]),
               "edges": len(fixture["edges"]), "duration_s": args.duration, "warmup_s": args.warmup,
-              "layer": args.layer, "probe": args.probe, "environment": env, "states": []}
+              "geometry_refresh_after_s": args.geometry_refresh or None,
+              "layer": args.layer, "probe": args.probe, "gpu_sampling": args.gpu_sampling,
+              "surface": args.surface,
+              "capture": args.capture,
+              "environment": env, "states": []}
     for state in states:
         print(f"measuring {state} for {args.duration:g} s ...", flush=True)
         try:

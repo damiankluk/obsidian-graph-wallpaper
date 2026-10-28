@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import math
 import re
@@ -68,7 +69,37 @@ def resolve_note(target: str, source: Path, vault: Path, exact: dict[str, str], 
     return matches[0] if matches else None
 
 
-def export(vault: Path) -> dict:
+def stable_position(relative: str) -> tuple[float, float, float]:
+    digest = hashlib.blake2b(relative.encode("utf-8"), digest_size=16).digest()
+    scale = float(1 << 64)
+    y = 1.0 - 2.0 * ((int.from_bytes(digest[:8], "big") + 0.5) / scale)
+    angle = 2.0 * math.pi * ((int.from_bytes(digest[8:], "big") + 0.5) / scale)
+    radius = math.sqrt(max(0.0, 1.0 - y * y))
+    return (round(math.cos(angle) * radius, 6), round(y, 6), round(math.sin(angle) * radius, 6))
+
+
+def cached_positions(cache_path: Path | None) -> dict[str, tuple[float, float, float]]:
+    if cache_path is None:
+        return {}
+    try:
+        if not cache_path.is_file() or cache_path.stat().st_size > MAX_CACHE_BYTES:
+            return {}
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        if cached.get("origin") != "obsidian-vault" or not isinstance(cached.get("nodes"), list):
+            return {}
+        positions = {}
+        for node in cached["nodes"]:
+            if not isinstance(node, dict) or not isinstance(node.get("id"), str):
+                continue
+            point = tuple(float(node.get(axis)) for axis in ("x", "y", "z"))
+            if all(math.isfinite(value) and -1.001 <= value <= 1.001 for value in point):
+                positions[node["id"]] = point
+        return positions
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+
+
+def export(vault: Path, previous_positions: dict[str, tuple[float, float, float]] | None = None) -> dict:
     vault = vault.expanduser().resolve(strict=True)
     if not vault.is_dir():
         raise ValueError(f"Vault path is not a directory: {vault}")
@@ -116,13 +147,11 @@ def export(vault: Path) -> dict:
         degree[source] += 1
         degree[destination] += 1
 
-    count = max(1, len(ordered_files))
+    previous_positions = previous_positions or {}
     nodes = []
-    golden_angle = math.pi * (3 - math.sqrt(5))
-    for index, relative in enumerate(ordered_files):
-        y = 1 - 2 * (index + 0.5) / count
-        radius = math.sqrt(max(0, 1 - y * y))
-        angle = golden_angle * index
+    for relative in ordered_files:
+        point = previous_positions.get(relative)
+        x, y, z = point if point is not None else stable_position(relative)
         group = relative.split("/", 1)[0] if "/" in relative else "Vault"
         nodes.append({
             "id": relative,
@@ -130,9 +159,9 @@ def export(vault: Path) -> dict:
             "group": group,
             "groupIndex": group_indexes[group],
             "degree": degree[relative],
-            "x": round(math.cos(angle) * radius, 6),
-            "y": round(y, 6),
-            "z": round(math.sin(angle) * radius, 6),
+            "x": x,
+            "y": y,
+            "z": z,
         })
 
     return {
@@ -177,7 +206,8 @@ def main() -> int:
         print("Usage: export_graph.py VAULT_PATH [--cache CACHE_PATH]", file=sys.stderr)
         return 2
     try:
-        payload = json.dumps(export(Path(args[0])), separators=(",", ":"))
+        previous = cached_positions(cache_path)
+        payload = json.dumps(export(Path(args[0]), previous), separators=(",", ":"))
         if cache_path is not None:
             try:
                 write_cache(cache_path, payload)

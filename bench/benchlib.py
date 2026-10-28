@@ -19,6 +19,7 @@ GROUP_COUNT = 9
 # Cadence (frames per second) per injected state. The shipped view and the
 # acceptance target now use the same fixed 30/60 Hz policy.
 STATES = ("idle", "agent", "pointer", "keyboard", "combined")
+TRANSITION_STATE = "transition"
 CURRENT_FPS = {"idle": 30, "agent": 60, "pointer": 60, "keyboard": 60, "combined": 60}
 TARGET_FPS = dict(CURRENT_FPS)
 
@@ -126,6 +127,34 @@ def frame_stats(intervals_ms: list[float], nominal_fps: float) -> dict:
     }
 
 
+def transition_frame_stats(intervals_ms: list[float], target_ms: list[int]) -> dict:
+    """Report cadence groups and intervals spanning a 30/60 Hz state switch."""
+    if len(intervals_ms) != len(target_ms):
+        return {"error": "timer intervals and cadence targets differ in length"}
+    groups = {}
+    for target in (17, 33):
+        samples = [value for value, cadence in zip(intervals_ms, target_ms) if cadence == target]
+        if samples:
+            groups[str(target)] = frame_stats(samples, 60 if target == 17 else 30)
+    boundaries = [{"from_ms": target_ms[index - 1], "to_ms": target_ms[index],
+                   "interval_ms": intervals_ms[index]}
+                  for index in range(1, len(target_ms)) if target_ms[index] != target_ms[index - 1]]
+    switch_counts = {}
+    switch_maxima = {}
+    for item in boundaries:
+        key = f"{item['from_ms']}->{item['to_ms']}"
+        switch_counts[key] = switch_counts.get(key, 0) + 1
+        switch_maxima[key] = max(switch_maxima.get(key, 0), item["interval_ms"])
+    return {
+        "groups": groups,
+        "cadence_switches": boundaries,
+        "cadence_switch_counts": switch_counts,
+        "cadence_switch_maxima_ms": {key: round(value, 3) for key, value in switch_maxima.items()},
+        "cadence_switch_max_ms": round(max((item["interval_ms"] for item in boundaries), default=0), 3)
+            if boundaries else None,
+    }
+
+
 def budget_verdict(stats: dict, cpu_percent: float | None = None, cpu_ceiling: float | None = None) -> dict:
     """Apply frame pacing rules and an optional evidence-based CPU ceiling."""
     failures: list[str] = []
@@ -191,3 +220,17 @@ def rss_growth(samples_kib: list[int]) -> dict:
         "growth_kib": samples_kib[-1] - samples_kib[0],
         "slope_kib_per_min": round(slope * 60, 1),
     }
+
+
+def parse_smaps_rollup(text: str) -> dict[str, int]:
+    """Parse selected process memory categories from /proc/PID/smaps_rollup."""
+    wanted = {"Rss", "Pss", "Shared_Clean", "Shared_Dirty", "Private_Clean", "Private_Dirty",
+              "Anonymous", "Swap"}
+    values = {}
+    for line in text.splitlines():
+        key, separator, rest = line.partition(":")
+        if separator and key in wanted:
+            fields = rest.split()
+            if fields and fields[0].isdigit():
+                values[key] = int(fields[0])
+    return values

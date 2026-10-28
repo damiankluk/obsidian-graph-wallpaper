@@ -83,11 +83,30 @@ class StatsTests(unittest.TestCase):
     def test_empty_intervals_are_reported_not_hidden(self):
         self.assertIn("error", benchlib.frame_stats([], 60))
 
+    def test_transition_intervals_are_grouped_and_switch_gaps_reported(self):
+        stats = benchlib.transition_frame_stats([17, 17, 34, 33, 17], [17, 17, 33, 33, 17])
+        self.assertEqual(stats["groups"]["17"]["frames"], 3)
+        self.assertEqual(stats["groups"]["33"]["frames"], 2)
+        self.assertEqual(stats["cadence_switches"], [
+            {"from_ms": 17, "to_ms": 33, "interval_ms": 34},
+            {"from_ms": 33, "to_ms": 17, "interval_ms": 17},
+        ])
+        self.assertEqual(stats["cadence_switch_counts"], {"17->33": 1, "33->17": 1})
+        self.assertEqual(stats["cadence_switch_maxima_ms"], {"17->33": 34, "33->17": 17})
+        self.assertEqual(stats["cadence_switch_max_ms"], 34)
+        self.assertIn("error", benchlib.transition_frame_stats([17], [17, 33]))
+
     def test_cpu_percent_and_rss_growth(self):
         self.assertAlmostEqual(benchlib.cpu_percent(100, 150, 10, 100), 5.0)
         growth = benchlib.rss_growth([1000, 1010, 1020, 1030])
         self.assertEqual(growth["growth_kib"], 30)
         self.assertEqual(growth["slope_kib_per_min"], 600.0)
+
+    def test_parse_smaps_rollup_keeps_memory_categories(self):
+        sample = "Rss: 120 kB\nPss: 80 kB\nPrivate_Dirty: 48 kB\nAnonymous: 32 kB\nSwap: 0 kB\n"
+        self.assertEqual(benchlib.parse_smaps_rollup(sample), {
+            "Rss": 120, "Pss": 80, "Private_Dirty": 48, "Anonymous": 32, "Swap": 0,
+        })
 
 
 class BudgetTests(unittest.TestCase):
@@ -207,12 +226,19 @@ class ProbeOffReportTests(unittest.TestCase):
         import run_benchmark
 
         state = {"state": "idle", "probe": "off", "shell_cpu_ticks": 530, "shell_cpu_percent_of_one_core": 17.67,
-                 "gpu_whole_device": None, "rss": {"growth_kib": 12}}
+                 "gpu_whole_device": None, "rss": {"growth_kib": 12}, "memory_breakdown_kib": {},
+                 "motion_levels": {"agent": 0.0, "pointer": 0.0, "keyboard": 0.0},
+                 "listening_levels": {"pointer": 0.0, "keyboard": 0.0}}
         text = run_benchmark.format_report({
             "timestamp": "t", "fixture": "approved", "nodes": 506, "edges": 1121, "duration_s": 30, "warmup_s": 3,
-            "layer": "bottom", "probe": "off", "environment": {"target_output": "DP-2"}, "states": [state]})
+            "layer": "bottom", "surface": "compact", "probe": "off",
+            "environment": {"target_output": "DP-2"}, "states": [state]})
         self.assertIn("probe OFF", text)
-        self.assertIn("| idle | 530 | 17.67 | n/a | 12 |", text)
+        self.assertIn("| idle | 530 | 17.67 | n/a | 12 | n/a | n/a |", text)
+        self.assertIn("## Rendered listening envelopes at measurement end", text)
+        self.assertIn("| idle | 0.0 | 0.0 |", text)
+        self.assertIn("## Rendered motion envelopes at measurement end", text)
+        self.assertIn("| idle | 0.0 | 0.0 | 0.0 |", text)
         self.assertNotIn("swap intervals", text)
 
 

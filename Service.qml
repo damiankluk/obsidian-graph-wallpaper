@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -89,6 +91,28 @@ Item {
     refreshProcess.running = true
   }
 
+  function sameGraphContent(left, right) {
+    if (!left || !right || !Array.isArray(left.nodes) || !Array.isArray(right.nodes)
+        || !Array.isArray(left.edges) || !Array.isArray(right.edges)
+        || left.nodes.length !== right.nodes.length || left.edges.length !== right.edges.length)
+      return false
+
+    for (var i = 0; i < left.nodes.length; i++) {
+      var a = left.nodes[i], b = right.nodes[i]
+      if (!a || !b || a.id !== b.id || a.label !== b.label || a.group !== b.group
+          || a.groupIndex !== b.groupIndex || a.degree !== b.degree
+          || a.x !== b.x || a.y !== b.y || a.z !== b.z)
+        return false
+    }
+    for (var j = 0; j < left.edges.length; j++) {
+      var edgeA = left.edges[j], edgeB = right.edges[j]
+      if (!Array.isArray(edgeA) || !Array.isArray(edgeB)
+          || edgeA.length !== edgeB.length || edgeA[0] !== edgeB[0] || edgeA[1] !== edgeB[1])
+        return false
+    }
+    return true
+  }
+
   function handleWatchEvent(line) {
     try {
       var event = JSON.parse(String(line).trim())
@@ -162,7 +186,11 @@ Item {
         }
       }
       emptyGraphResults = 0
-      graphData = parsed
+      // Refreshes also run on a timer and on every Markdown save. Leave the
+      // current object in place when the exported graph is identical: the
+      // view treats graph replacement as a new generation and rebuilds both
+      // GPU meshes synchronously.
+      if (!sameGraphContent(graphData, parsed)) graphData = parsed
       freshGraphLoaded = true
       errorText = ""
       lastGraphRefresh = Date.now()
@@ -192,7 +220,8 @@ Item {
     function refresh(): void { root.refresh() }
     function status(): string {
       return JSON.stringify({
-        diagnosticBuild: "7c83763",
+        diagnosticBuild: root.manifest && root.manifest.entryPoints
+          ? String(root.manifest.entryPoints.service || "unknown") : "manifest-unavailable",
         vaultPath: root.vaultPath,
         output: root.targetScreens.length ? String(root.targetScreens[0].name) : "not found",
         nodes: root.graphData.nodes.length,
@@ -201,6 +230,7 @@ Item {
         activeAgents: root.agentActivity,
         renderedAgentLevel: root.renderedAgentLevel,
         renderedThoughtLevel: root.renderedThoughtLevel,
+        rendererReady: root.renderedShaderStatus === 2,
         shaderStatus: root.renderedShaderStatus,
         vaultWatcher: root.vaultWatcherReady ? "ready" : "retrying",
         lastGraphRefresh: root.lastGraphRefresh,
@@ -214,7 +244,9 @@ Item {
   IdleMonitor {
     id: activityMonitor
     enabled: true
-    timeout: 2
+    // Declare the aggregate user input idle shortly after the last event; the
+    // shader ripple then supplies the remaining ~1.5 s of eased decay.
+    timeout: 0.25
     respectInhibitors: false
   }
 
@@ -238,7 +270,9 @@ Item {
       }
       if (root.refreshQueued) {
         root.refreshQueued = false
-        root.refresh()
+        // Let writes that arrived during an export coalesce before starting
+        // another full vault scan and graph update.
+        graphRefreshDebounce.restart()
       }
     }
   }
@@ -285,7 +319,7 @@ Item {
 
   Timer {
     id: graphRefreshDebounce
-    interval: 750
+    interval: 1000
     repeat: false
     onTriggered: root.refresh()
   }
@@ -322,14 +356,20 @@ Item {
       screen: modelData
       readonly property var hyprlandMonitor: Hyprland.monitorFor(modelData)
       readonly property var activeWorkspace: hyprlandMonitor ? hyprlandMonitor.activeWorkspace : null
-      anchors { top: true; bottom: true; left: true; right: true }
+      // The graph raster is capped at 1520 logical pixels wide. Keep the
+      // transparent layer surface to that same width instead of asking the
+      // compositor to blend an unused full-width strip on wide displays.
+      anchors { top: true; left: true }
+      implicitWidth: Math.min(modelData.width, 1520)
+      implicitHeight: modelData.height
+      margins.left: Math.max(0, Math.round((modelData.width - implicitWidth) / 2))
       color: "transparent"
       exclusionMode: ExclusionMode.Ignore
       WlrLayershell.namespace: "obsidian-graph"
       WlrLayershell.layer: WlrLayer.Bottom
       WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
-      GraphView {
+      Graph3DView {
         id: graphView
         anchors.fill: parent
         opacity: root.graphData.nodes.length > 0 && firstFramePainted ? 1 : 0
@@ -348,11 +388,11 @@ Item {
           if (thoughtMotionLevel > 0.98 || thoughtMotionLevel < 0.02)
             root.renderedThoughtLevel = thoughtMotionLevel
         }
-        onBubbleShaderStatusChanged: root.renderedShaderStatus = bubbleShaderStatus
+        onRendererReadyStatusChanged: root.renderedShaderStatus = rendererReadyStatus
         Component.onCompleted: {
           root.renderedAgentLevel = agentMotionLevel
           root.renderedThoughtLevel = thoughtMotionLevel
-          root.renderedShaderStatus = bubbleShaderStatus
+          root.renderedShaderStatus = rendererReadyStatus
         }
       }
     }
