@@ -64,10 +64,10 @@ void main() {
     vec2 direction = radial > 0.001 ? normalize(corrected) : vec2(0.0);
     float phase = radial * 18.8495559215 - elapsedTime * 1.96349540849;
     float ripple = sin(phase);
-    corrected += direction * (23.0 * thoughtLevel * body * ripple);
+    corrected += direction * (34.0 * thoughtLevel * body * ripple);
     vec2 eddy = vec2(sin(corrected.y / radius * 4.8 + elapsedTime * 0.83),
                      cos(corrected.x / radius * 4.1 - elapsedTime * 0.71));
-    corrected += eddy * (6.0 * thoughtLevel * body);
+    corrected += eddy * (10.0 * thoughtLevel * body);
 
     // Listening feedback stays subordinate to agent motion: a local pointer
     // ring and a broader keyboard wave fade through their own envelopes.
