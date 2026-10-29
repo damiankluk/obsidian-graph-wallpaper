@@ -9,7 +9,7 @@ An animated, local-only graph wallpaper for an Obsidian vault. It projects linke
 - Reads Markdown note names and local links from one configured Obsidian vault.
 - Supports Obsidian wikilinks and ordinary Markdown links between notes.
 - Builds the graph mesh once per vault generation with Qt Quick 3D; GPU shaders animate the sphere, flow light along real links, and add listening ripples. It creates no per-note or per-link QML objects.
-- Builds changed graph generations in short event-loop slices while keeping the last complete mesh on screen. Mesh buffers swap only after the replacement is ready, avoiding a long synchronous pause during live vault updates.
+- Builds changed graph generations in short event-loop slices into a detached mesh pair, then swaps the complete node/link generation together. The last complete mesh stays on screen during live vault updates.
 - Defaults to the display with the largest pixel area. Set `OMARCHY_OBSIDIAN_GRAPH_OUTPUT` to a connector name (for example `DP-2`) to pick a display explicitly.
 - Idle drift and activity share one eased orbit response: keyboard, pointer movement, or an active agent gradually raises the motion, then it settles back smoothly. Pointer motion also adds gentle camera parallax and a local listening ripple; keyboard activity adds a subtler center ripple. When an Obsidian window is focused, the matching note node is highlighted by title.
 - Watches Markdown files with Linux inotify and refreshes the graph shortly after a save; a bounded five-minute scan recovers from missed watcher events. If the vault is not mounted, it retries every ten seconds. Call `omarchy-shell io.github.damiankluk.obsidian-graph refresh` to refresh manually; this updates the existing surface without restarting the shell.
@@ -79,7 +79,7 @@ omarchy plugin validate .
 
 `bash tests/run` runs portable checks, cadence simulation, the 3D shader contract checks, runtime-package consistency, and manifest validation. `python3 bench/run_benchmark.py --states idle,agent --duration 60` measures only real notes from the configured vault by default. Synthetic stress fixtures are available for isolated development checks, and are never written to the production vault cache. The timing probe records Quickshell `frameSwapped` timestamps, not compositor presentation or scanout.
 
-To measure a live geometry-generation swap in isolation, use a synthetic fixture and request one note/link addition during measurement:
+To measure repeated live geometry-generation swaps in isolation, use a synthetic fixture and toggle one note/link every three seconds:
 
 ```bash
 python3 bench/run_benchmark.py --fixture approved --states idle --duration 10 --geometry-refresh 3

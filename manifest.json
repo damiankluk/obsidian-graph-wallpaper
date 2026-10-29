@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.damiankluk.obsidian-graph",
   "name": "Obsidian Graph Wallpaper",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "author": "damiankluk",
   "license": "MIT",
   "description": "Animated, local-only 3D-style graph wallpaper with live vault and agent activity updates.",
@@ -10,6 +10,6 @@
     "service"
   ],
   "entryPoints": {
-    "service": "runtime/v49825ccca9a0133c/Service.qml"
+    "service": "runtime/ve55e17b8a43ac746/Service.qml"
   }
 }

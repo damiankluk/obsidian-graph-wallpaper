@@ -323,6 +323,7 @@ def measure_state(state: str, args, fixture_path: pathlib.Path, out_dir: pathlib
     base = {"state": state, "probe": args.probe, "nodes": result["nodes"], "edges": result["edges"],
             "screen": result["screen"], "view": result["view"], "frame_timing": frame_timing,
             "geometry_refresh_triggered": result.get("geometryRefreshTriggered", False),
+            "geometry_refresh_count": result.get("geometryRefreshCount", 0),
             "motion_levels": result.get("motion_levels"),
             "listening_levels": result.get("listening_levels")}
     if args.probe == "off":
@@ -353,9 +354,9 @@ def format_report(report: dict) -> str:
              "## Environment (limits on these numbers)"]
     for key, value in env.items():
         lines.append(f"- {key}: {value if value is not None else 'unavailable'}")
-    if report.get("geometry_refresh_after_s") is not None:
-        lines.append(f"- synthetic geometry change after {report['geometry_refresh_after_s']} s: "
-                     f"{'triggered' if any(s.get('geometry_refresh_triggered') for s in report['states']) else 'not observed'}")
+    if report.get("geometry_refresh_interval_s") is not None:
+        changes = sum(s.get("geometry_refresh_count", 0) for s in report["states"])
+        lines.append(f"- synthetic geometry changes every {report['geometry_refresh_interval_s']} s: {changes} observed")
     if any(r.get("listening_levels") for r in report["states"]):
         lines += ["", "## Rendered listening envelopes at measurement end",
                   "These values confirm that injected pointer and keyboard activity reached the real 3D view.",
@@ -495,7 +496,7 @@ def main() -> int:
     parser.add_argument("--duration", type=float, default=60)
     parser.add_argument("--warmup", type=float, default=3)
     parser.add_argument("--geometry-refresh", type=float, default=0,
-                        help="add one synthetic note/link after this many measured seconds; use a synthetic fixture")
+                        help="toggle one synthetic note/link every N measured seconds; use a synthetic fixture")
     parser.add_argument("--output", help="monitor name (default: largest by pixel area)")
     parser.add_argument("--layer", choices=("bottom", "top"), default="bottom")
     parser.add_argument("--surface", choices=("compact", "full"), default="compact",
@@ -516,7 +517,7 @@ def main() -> int:
     if unknown:
         parser.error(f"unknown states: {unknown}")
     if args.geometry_refresh < 0 or args.geometry_refresh >= args.duration:
-        parser.error("--geometry-refresh must be >= 0 and less than --duration")
+        parser.error("--geometry-refresh interval must be >= 0 and less than --duration")
     if args.geometry_refresh > 0 and args.fixture == "vault":
         parser.error("--geometry-refresh requires an explicit synthetic fixture")
     for tool in ("quickshell",):
@@ -544,7 +545,7 @@ def main() -> int:
     output = env["target_output"]
     report = {"timestamp": stamp, "fixture": fixture_name, "nodes": len(fixture["nodes"]),
               "edges": len(fixture["edges"]), "duration_s": args.duration, "warmup_s": args.warmup,
-              "geometry_refresh_after_s": args.geometry_refresh or None,
+              "geometry_refresh_interval_s": args.geometry_refresh or None,
               "layer": args.layer, "probe": args.probe, "gpu_sampling": args.gpu_sampling,
               "surface": args.surface,
               "capture": args.capture,

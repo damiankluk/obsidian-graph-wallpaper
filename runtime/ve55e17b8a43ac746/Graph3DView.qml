@@ -40,6 +40,10 @@ Item {
   property var geometryData: null
   property var geometryBuild: null
   property int geometryBuildGeneration: 0
+  property bool alternateGeometryActive: false
+  property int completedGeometryGeneration: 0
+  property real lastGeometryBuildDurationMs: 0
+  property double lastGeometryBuildCompletedAt: 0
   property var labelIndices: []
   property var labelTexts: []
   property var labelX: new Float32Array(0)
@@ -137,6 +141,7 @@ Item {
     geometryBuildGeneration++
     geometryBuild = {
       generation: geometryBuildGeneration,
+      startedAtMs: Date.now(),
       graph: currentGraph,
       nodeCount: nodeCount,
       edgeCount: edgeCount,
@@ -175,7 +180,7 @@ Item {
     var sourceName = descriptor[0], kind = descriptor[1], width = descriptor[2]
     var source = state.arrays[sourceName]
     var cursor = state.conversionCursor
-    var end = Math.min(source.length, cursor + Math.floor(512 / width) * width)
+    var end = Math.min(source.length, cursor + Math.floor(256 / width) * width)
     var outputName = sourceName.indexOf("node") === 0 ? "node" : "edge"
     var output = state.converted[outputName + kind]
     if (!output) output = state.converted[outputName + kind] = []
@@ -201,19 +206,25 @@ Item {
 
   function finishGeometryBuild(state) {
     if (state.generation !== geometryBuildGeneration) return
-    // Replace all mesh attributes together after the complete next generation
-    // has been assembled. The visible mesh remains intact throughout the work.
-    nodeGeometry.positions = state.converted.nodepositions || []
-    nodeGeometry.uv0s = state.converted.nodeuvs || []
-    nodeGeometry.colors = state.converted.nodecolors || []
-    nodeGeometry.indexes = state.converted.nodeindices || []
-    edgeGeometry.positions = state.converted.edgepositions || []
-    edgeGeometry.uv0s = state.converted.edgeuvs || []
-    edgeGeometry.colors = state.converted.edgecolors || []
-    edgeGeometry.indexes = state.converted.edgeindices || []
+    // Fill the detached mesh pair first, then switch both models to it in one
+    // binding update. The renderer never observes half of a generation.
+    var nextNodeGeometry = alternateGeometryActive ? nodeGeometry : nodeGeometryAlternate
+    var nextEdgeGeometry = alternateGeometryActive ? edgeGeometry : edgeGeometryAlternate
+    nextNodeGeometry.positions = state.converted.nodepositions || []
+    nextNodeGeometry.uv0s = state.converted.nodeuvs || []
+    nextNodeGeometry.colors = state.converted.nodecolors || []
+    nextNodeGeometry.indexes = state.converted.nodeindices || []
+    nextEdgeGeometry.positions = state.converted.edgepositions || []
+    nextEdgeGeometry.uv0s = state.converted.edgeuvs || []
+    nextEdgeGeometry.colors = state.converted.edgecolors || []
+    nextEdgeGeometry.indexes = state.converted.edgeindices || []
+    alternateGeometryActive = !alternateGeometryActive
     renderedGraph = state.graph
     geometryData = { nodeCount: state.nodeCount, edgeCount: state.builtEdgeCount }
     geometryReady = state.nodeCount > 0
+    lastGeometryBuildDurationMs = Math.max(0, Date.now() - state.startedAtMs)
+    lastGeometryBuildCompletedAt = Date.now()
+    completedGeometryGeneration = state.generation
     geometryBuild = null
     updateLabels()
     updateFocus()
@@ -228,7 +239,7 @@ Item {
     if (state.generation !== geometryBuildGeneration) return
     if (state.stage === "build") {
       if (state.nodeCursor < state.nodeCount) {
-        var nodeEnd = Math.min(state.nodeCount, state.nodeCursor + 48)
+        var nodeEnd = Math.min(state.nodeCount, state.nodeCursor + 24)
         var nodes = GraphGeometry.build(state.graph, {
           nodeStart: state.nodeCursor, nodeEnd: nodeEnd,
           edgeStart: 0, edgeEnd: 0, includeLabels: false
@@ -242,7 +253,7 @@ Item {
         return
       }
       if (state.edgeCursor < state.edgeCount) {
-        var edgeEnd = Math.min(state.edgeCount, state.edgeCursor + 96)
+        var edgeEnd = Math.min(state.edgeCount, state.edgeCursor + 48)
         var edges = GraphGeometry.build(state.graph, {
           nodeStart: 0, nodeEnd: 0,
           edgeStart: state.edgeCursor, edgeEnd: edgeEnd, includeLabels: false
@@ -414,12 +425,20 @@ Item {
       primitiveMode: ProceduralMesh.Triangles
     }
     ProceduralMesh {
+      id: nodeGeometryAlternate
+      primitiveMode: ProceduralMesh.Triangles
+    }
+    ProceduralMesh {
       id: edgeGeometry
+      primitiveMode: ProceduralMesh.Lines
+    }
+    ProceduralMesh {
+      id: edgeGeometryAlternate
       primitiveMode: ProceduralMesh.Lines
     }
 
     Model {
-      geometry: edgeGeometry
+      geometry: root.alternateGeometryActive ? edgeGeometryAlternate : edgeGeometry
       materials: CustomMaterial {
         id: edgeMaterial
         shadingMode: CustomMaterial.Unshaded
@@ -451,7 +470,7 @@ Item {
       }
     }
     Model {
-      geometry: nodeGeometry
+      geometry: root.alternateGeometryActive ? nodeGeometryAlternate : nodeGeometry
       materials: CustomMaterial {
         id: nodeMaterial
         shadingMode: CustomMaterial.Unshaded

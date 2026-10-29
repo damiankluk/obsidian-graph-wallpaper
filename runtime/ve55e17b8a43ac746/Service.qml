@@ -20,6 +20,11 @@ Item {
   property real renderedAgentLevel: 0
   property real renderedThoughtLevel: 0
   property int renderedShaderStatus: -1
+  property int graphBuildGeneration: 0
+  property int graphBuildCompleted: 0
+  property bool graphBuildInProgress: false
+  property real lastGraphBuildDurationMs: 0
+  property double lastGraphBuildCompletedAt: 0
   property bool freshGraphLoaded: false
   property double lastGraphRefresh: 0
   property var targetScreens: []
@@ -188,8 +193,8 @@ Item {
       emptyGraphResults = 0
       // Refreshes also run on a timer and on every Markdown save. Leave the
       // current object in place when the exported graph is identical: the
-      // view treats graph replacement as a new generation and rebuilds both
-      // GPU meshes synchronously.
+      // view builds changed mesh generations in short slices and keeps the
+      // current pair attached until the complete replacement is ready.
       if (!sameGraphContent(graphData, parsed)) graphData = parsed
       freshGraphLoaded = true
       errorText = ""
@@ -232,6 +237,11 @@ Item {
         renderedThoughtLevel: root.renderedThoughtLevel,
         rendererReady: root.renderedShaderStatus === 2,
         shaderStatus: root.renderedShaderStatus,
+        graphBuildGeneration: root.graphBuildGeneration,
+        graphBuildCompleted: root.graphBuildCompleted,
+        graphBuildInProgress: root.graphBuildInProgress,
+        lastGraphBuildDurationMs: root.lastGraphBuildDurationMs,
+        lastGraphBuildCompletedAt: root.lastGraphBuildCompletedAt,
         vaultWatcher: root.vaultWatcherReady ? "ready" : "retrying",
         lastGraphRefresh: root.lastGraphRefresh,
         error: root.errorText
@@ -380,6 +390,11 @@ Item {
         activeNoteTitle: root.activeNoteTitle
         agentActivity: root.agentActivity
         recentlyChangedIds: root.recentlyChangedIds
+        onGeometryBuildGenerationChanged: root.graphBuildGeneration = geometryBuildGeneration
+        onCompletedGeometryGenerationChanged: root.graphBuildCompleted = completedGeometryGeneration
+        onGeometryBuildChanged: root.graphBuildInProgress = geometryBuild !== null
+        onLastGeometryBuildDurationMsChanged: root.lastGraphBuildDurationMs = lastGeometryBuildDurationMs
+        onLastGeometryBuildCompletedAtChanged: root.lastGraphBuildCompletedAt = lastGeometryBuildCompletedAt
         onAgentMotionLevelChanged: {
           if (agentMotionLevel > 0.98 || agentMotionLevel < 0.02)
             root.renderedAgentLevel = agentMotionLevel
@@ -393,6 +408,11 @@ Item {
           root.renderedAgentLevel = agentMotionLevel
           root.renderedThoughtLevel = thoughtMotionLevel
           root.renderedShaderStatus = rendererReadyStatus
+          root.graphBuildGeneration = geometryBuildGeneration
+          root.graphBuildCompleted = completedGeometryGeneration
+          root.graphBuildInProgress = geometryBuild !== null
+          root.lastGraphBuildDurationMs = lastGeometryBuildDurationMs
+          root.lastGraphBuildCompletedAt = lastGeometryBuildCompletedAt
         }
       }
     }

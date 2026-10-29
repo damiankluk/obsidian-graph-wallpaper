@@ -161,7 +161,8 @@ ShellRoot {
                             keyboard: bench.view.keyboardMotionLevel },
         nodes: bench.graph.nodes.length,
         edges: bench.graph.edges.length,
-        geometryRefreshTriggered: geometryRefreshTriggered,
+        geometryRefreshTriggered: geometryRefreshCount > 0,
+        geometryRefreshCount: geometryRefreshCount,
         screen: bench.targetScreen ? { name: String(bench.targetScreen.name), width: bench.targetScreen.width, height: bench.targetScreen.height } : null,
         view: { width: bench.view.width, height: bench.view.height,
                 shaderViewport: bench.view.shaderViewportLimit }
@@ -172,25 +173,39 @@ ShellRoot {
     }
   }
 
-  property bool geometryRefreshTriggered: false
+  property int geometryRefreshCount: 0
 
   Timer {
     id: geometryRefresh
     interval: Math.max(1, bench.geometryRefreshSeconds * 1000)
-    repeat: false
+    repeat: true
     onTriggered: {
       if (!bench.graph.nodes.length) return
       var nodes = bench.graph.nodes.slice(0)
       var edges = bench.graph.edges.slice(0)
       var anchor = nodes[0]
-      nodes.push({ id: "Benchmark/RefreshProbe.md", label: "Refresh Probe",
-                   group: "Benchmark", groupIndex: Number(anchor.groupIndex) || 0,
-                   degree: 1, x: 0.31, y: -0.77, z: 0.55 })
-      edges.push(["Benchmark/RefreshProbe.md", anchor.id])
+      var probeId = "Benchmark/RefreshProbe.md"
+      var probeIndex = -1
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].id === probeId) { probeIndex = i; break }
+      }
+      if (probeIndex >= 0) {
+        nodes.splice(probeIndex, 1)
+        var remainingEdges = []
+        for (var e = 0; e < edges.length; e++)
+          if (edges[e][0] !== probeId && edges[e][1] !== probeId) remainingEdges.push(edges[e])
+        edges = remainingEdges
+      } else {
+        nodes.push({ id: probeId, label: "Refresh Probe",
+                     group: "Benchmark", groupIndex: Number(anchor.groupIndex) || 0,
+                     degree: 1, x: 0.31, y: -0.77, z: 0.55 })
+        edges.push([probeId, anchor.id])
+      }
       bench.graph = { origin: bench.graph.origin, nodes: nodes, edges: edges,
                       stats: bench.graph.stats || {} }
-      bench.geometryRefreshTriggered = true
-      console.log("OGBENCH geometry-refresh " + JSON.stringify({ nodes: nodes.length, edges: edges.length }))
+      bench.geometryRefreshCount++
+      console.log("OGBENCH geometry-refresh " + JSON.stringify({ count: bench.geometryRefreshCount,
+                                                                    nodes: nodes.length, edges: edges.length }))
     }
   }
 
